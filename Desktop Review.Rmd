@@ -8,11 +8,11 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  origin_login_file: kenya
+  origin_login_file: training_kenya
   cache: TRUE
 ---
 
-```{r , echo = TRUE, results='hold', message=FALSE, cache=FALSE}
+```{r , echo = TRUE, results='hold', message=FALSE, cache=FALSE, warning=FALSE}
 
 library( rlist )
 library(knitr)
@@ -23,6 +23,7 @@ require(jsonlite)
 require(XML)
 require(assertthat)
 library( lubridate )
+library( scales )
 library(tidyverse) 
 
 
@@ -33,19 +34,23 @@ knitr::opts_chunk$set( echo = TRUE ,
 
 ```
 
+
 ```{r, cache = FALSE}
 
   # functions for fetching metadata
 
-  source( 'dhis2-data-munging/bootstrap/bootstrap_functions.R' )
+  dhis2 = "../HMIS/DHIS2/"  # Location of base files
+
+  source( paste0( dhis2,
+                  'dhis2-data-munging/bootstrap/bootstrap_functions.R' ) )
   
   # folder for storing review data
-  
-  if (!file.exists( params$origin_login_file )){
-    dir.create( params$origin_login_file )
+  folder = paste0( dhis2 ,  params$origin_login_file  , "/" )
+    
+  if ( !file.exists( folder ) ){
+    dir.create( folder ) 
   } 
-  
-  folder = paste0( params$origin_login_file , "/" )
+ 
   
   # login shortcut
    login = function(){
@@ -98,10 +103,11 @@ knitr::opts_chunk$set( echo = TRUE ,
 # Metadata 
 
 
+
 ```{r all_meta }
 
   meta_data_file = paste0( folder , params$origin_login_file, 
-                           "metadata.rds" ) 
+                           "_metadata.rds" ) 
 
   if ( !file.exists( meta_data_file) ){
    
@@ -114,60 +120,80 @@ knitr::opts_chunk$set( echo = TRUE ,
     
     write_rds( md, meta_data_file )
     
+  } else {
+      
+       md = read_rds( meta_data_file )
   }
 
+  # re-order alaphabetically to be easier to browse in View
+  md = md[order(names(md))]
+  
+  # Retrieve access data 
   date_metadata = file.info( meta_data_file )$ctime 
   
 ```
 
 Results shown are for data accessed on `r format(date_metadata, "%d %B %Y") `.
 
-## Summary of number of OU, dataElements, Categories, etc.
+## Numbers of each attribute
 
-```{r loadSaveMetadata }
+```{r attribute_numbers }
 
-  md = read_rds( paste0( folder , params$origin_login_file, 
-                         "_metadata.rds" )
-                 )
+ map_df( md[names(md)], ~length(.x$id) ) %>% t %>% comma %>% 
+    kable( align = 'r' )
 
-  # re-order alaphabetically to be easier to browse in View
-  md = md[order(names(md))]
 
-  # View( md )
+
 ```
 
 ## Organizational Units and levels
 
 ```{r}
 
-  md.ou =  md$organisationUnits
-  
-    ous = md.ou %>% 
-        select( id, path, name, shortName, featureType, 
+feature_type = function( coordinate ){
+    n = length( gregexpr( '[' , coordinate , fixed = TRUE)[[1]] )
+    
+    
+    if (n==1) return('Point') 
+    if (n>1) return('Polygon') 
+    return(NA)
+
+}
+
+ ous =  md$organisationUnits %>% 
+        select( id, path, name, shortName, coordinates , 
                 created, lastUpdated, openingDate, closedDate 
                 ) %>%
         mutate( 
-          level = map_dbl( path, 
+          level = map_int( path, 
                                ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
-                               ) %>% 
-            factor
+                               ) ,
+          feature = map_chr( coordinates, ~feature_type(.x) )
         )
     
 
-
-```
-
-
-## OU Attributes 
-
-```{r ou_attributes }
-  ou.attributes = md.ou$attributeValues
-
-  # are there any attributes?
-  sum( map_lgl( ou.attributes, ~length(.x) > 0 ) )
+  table_ou_levels =   count( ous, level ) %>%
+      left_join( select( md$organisationUnitLevel, offlineLevels, name) ,
+                  by = c('level'='offlineLevels') ) %>% 
+            filter( !grepl( 'Level', name )  ) %>% # removes generic levels ('Level-8')
+      select( level, name, n ) 
   
- 
+  
+  # Add feature types
+  ousFeatures = count( ous, level, feature ) %>% 
+      spread(  feature, n )
+  
+  feature_table = left_join( table_ou_levels, 
+                            ousFeatures, by = 'level' ) %>%
+      mutate( n = comma(n) ) 
+    
+  kable( feature_table, align = c( 'l', 'l', 'r' ) ) 
+
 ```
+
+
+There, `r sum( map_lgl( md.ou$attributeValues , ~length(.x) > 0 ) )` have an attribute values assigned to OU.  
+
 
 ## OU Levels
 
@@ -198,13 +224,13 @@ NB : stratify by attributes such as private, public--if available
 
  ousFeatures = count( ous, level, featureType )
   
-  ousPerLevel = count( ous, level )
+ ousPerLevel = count( ous, level )
 
  count(ous, nchar( openingDate)>0 ) # all have
 
   table( year( ymd_hms( ous$openingDate )) ) # but some are recent
 
-  count( ous, nchar( closedDate)>0 )
+  
   
   n_distinct( ous$name )
 
@@ -259,9 +285,7 @@ NB  confirm whether all units assigned to category
 
 NB: Define relevent datasets
 
-```{r datasets }
-
- md.dataset = md$dataSets
+```{r datasets 
 
   md.dataset$name 
   
