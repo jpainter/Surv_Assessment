@@ -1,0 +1,477 @@
+---
+title: "Desktop Review"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+editor_options: 
+  chunk_output_type: console
+params:
+  origin_login_file: kenya
+  cache: TRUE
+---
+
+```{r , echo = TRUE, results='hold', message=FALSE, cache=FALSE}
+
+library( rlist )
+library(knitr)
+library(kableExtra)
+library(DT)
+require(httr)
+require(jsonlite)
+require(XML)
+require(assertthat)
+library( lubridate )
+library(tidyverse) 
+
+
+knitr::opts_chunk$set( echo = TRUE ,
+                       # knitr.table.format = "html" ,
+                       cache = TRUE # TRUE for testing; FALSE for production
+                       )
+
+```
+
+```{r, cache = FALSE}
+
+  # functions for fetching metadata
+
+  source( 'dhis2-data-munging/bootstrap/bootstrap_functions.R' )
+  
+  # folder for storing review data
+  
+  if (!file.exists( params$origin_login_file )){
+    dir.create( params$origin_login_file )
+  } 
+  
+  folder = paste0( params$origin_login_file , "/" )
+  
+  # login shortcut
+   login = function(){
+       source( paste0( folder, 
+                       tolower( params$origin_login_file ) , 
+                       "_login")  )
+       loginDHIS2( baseurl, username, password)
+   }
+ 
+
+```
+
+<!-- Define the year-month time periods for the review -->
+
+<!-- NB:  What about IDSR with weeks?  -->
+
+```{r date_strings }
+
+ # Function to create string of dates
+  date_code = function( years = 2013:2017 , months = 1:12 ){
+    period = character()
+    
+    for (year in years ){
+      for (month in seq_along(months)){
+        this_period = paste0( ";", 
+                         year , 
+                         ifelse( month < 10 , paste0("0", month) , month )
+        )
+        period =  c(period, this_period )
+      }
+    }
+    
+    # remove first ;
+    period =  paste( period, collapse = "")
+    period = substring( period, 2, nchar(period))
+    
+    return( period )
+  }
+ 
+  periods = date_code() # default: 2013-2017
+  # periods = date_code( 2017, 1 ) # January 2017 only
+  
+  # as character vector
+  periods.vector = strsplit( periods, ";" , fixed = TRUE )[[1]]
+
+  
+```
+
+
+# Metadata 
+
+
+```{r all_meta }
+
+  meta_data_file = paste0( folder , params$origin_login_file, 
+                           "metadata.rds" ) 
+
+  if ( !file.exists( meta_data_file) ){
+   
+    # login in to server
+    login()
+  
+    md = metadataDHIS2( baseurl, 'all' )
+    
+    # glimpse( md )
+    
+    write_rds( md, meta_data_file )
+    
+  }
+
+  date_metadata = file.info( meta_data_file )$ctime 
+  
+```
+
+Results shown are for data accessed on `r format(date_metadata, "%d %B %Y") `.
+
+## Summary of number of OU, dataElements, Categories, etc.
+
+```{r loadSaveMetadata }
+
+  md = read_rds( paste0( folder , params$origin_login_file, 
+                         "_metadata.rds" )
+                 )
+
+  # re-order alaphabetically to be easier to browse in View
+  md = md[order(names(md))]
+
+  # View( md )
+```
+
+## Organizational Units and levels
+
+```{r}
+
+  md.ou =  md$organisationUnits
+  
+    ous = md.ou %>% 
+        select( id, path, name, shortName, featureType, 
+                created, lastUpdated, openingDate, closedDate 
+                ) %>%
+        mutate( 
+          level = map_dbl( path, 
+                               ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+                               ) %>% 
+            factor
+        )
+    
+
+
+```
+
+
+## OU Attributes 
+
+```{r ou_attributes }
+  ou.attributes = md.ou$attributeValues
+
+  # are there any attributes?
+  sum( map_lgl( ou.attributes, ~length(.x) > 0 ) )
+  
+ 
+```
+
+## OU Levels
+
+```{r ou_levels}
+
+ 
+  md.ouLevels =  md$organisationUnitLevels
+
+  # levels
+      levels = character()
+      for ( i in seq_along( md.ouLevels$id) ){
+    
+        levels =  c(levels, paste0("LEVEL-", i) )
+      }
+      
+      levels = paste( levels, collapse = ";")
+  
+  # import month by month
+  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+  
+```
+
+summarise enumerated features by level
+
+NB : stratify by attributes such as private, public--if available
+
+```{r ous_by_level}
+
+ ousFeatures = count( ous, level, featureType )
+  
+  ousPerLevel = count( ous, level )
+
+ count(ous, nchar( openingDate)>0 ) # all have
+
+  table( year( ymd_hms( ous$openingDate )) ) # but some are recent
+
+  count( ous, nchar( closedDate)>0 )
+  
+  n_distinct( ous$name )
+
+  p = strsplit( periods , ";" , fixed = TRUE )[[1]]
+  p = paste0( p , "01")
+  p = ymd( p )
+  
+  # number of units per level 
+   n.level = list()
+   for ( i in 1:8 ){
+      
+      n = map_int( p, ~ous %>%
+                      filter( level %in% i  ) %>%
+                      summarise(
+                        n = sum( openingDate < .x & 
+                                   ifelse( !is.na(closedDate), 
+                                           closedDate > .x, TRUE )
+                                 ) ) %>% .$n
+      )
+      n.level[[i]] = n
+   }
+   
+  # combine into df
+  ous.n = data_frame(
+    level = rep( 1:8 , each = length(p) ) ,
+    period = rep( periods.vector, length( levels.vector ) ) ,
+    n = unlist( n.level )
+  ) %>%
+    filter( n > 1 )
+  
+  ggplot( ous.n,  aes(x = period, y = n )) + geom_point() +
+    facet_wrap( ~level , scales = 'free' )
+  
+  ###NB Join wiht ou levels for labels
+  
+```
+
+NB: not all ou will be assigned to a dataset, and some may be duplicates...
+## OU unit groups and group sets ?   
+
+  - private / public
+  - elimination / control 
+  
+NB  confirm whether all units assigned to group
+
+## Categories linked with orgUnits
+  
+NB  confirm whether all units assigned to category
+
+
+## Datasets
+
+NB: Define relevent datasets
+
+```{r datasets }
+
+ md.dataset = md$dataSets
+
+  md.dataset$name 
+  
+  # Need to select by manual, eyeball review
+  mal.datasets = md.dataset$name[ c( 19, 20, 32, 37, 40 , 44, 45, 64:65, 67, 116, 117 )]
+  
+  mal.datasets
+```
+
+Count the org units assigned to each form, which is the basis for the number of expected reports.  If an org unit is not assigned to the dataset, a report is not expected. 
+
+```{r dataset_ous , results = 'asis' }
+
+  dataset.ous.n = function( dataset ){
+  
+    opd.orgs = md.dataset[ md.dataset$name %in% dataset ,
+                           "organisationUnits"][[1]] %>% 
+      mutate( dataset = dataset ) %>%
+      right_join( ous , by = "id" ) 
+    
+    count( opd.orgs, level, dataset ) %>% 
+      spread( dataset, n ) %>%
+      rename( Unassigned = `<NA>` ) %>%
+      kable( "html", caption = dataset ) %>%
+      kable_styling(bootstrap_options = c("striped", "hover"))
+  }
+
+ # map( mal.datasets, ~dataset.ous.n(.x) ) 
+ 
+ for ( i in seq_along( mal.datasets )){
+   print( dataset.ous.n( mal.datasets[i] ) )
+ } 
+ 
+  
+```
+
+- Dataset ous by county....
+
+## Data elements and categories
+
+<!-- NB-note which record zero... -->
+
+<!-- NB: Which elements record zero??? -->
+
+# Data completeness, reporting trends, 
+
+
+
+<!-- NB - After getting data, run algorithm for major outliers.  For subsequent charts looking at trends, etc, Replace the outliers so that scale of charts is not distorted to the point where all the true data is not compressed to the bottom of the chart.   -->
+
+
+```{r fetch_data_values, eval=FALSE}
+
+  # levels
+      levels = character()
+      for ( i in seq_along( md.ouLevels$id) ){
+    
+        levels =  c(levels, paste0("LEVEL-", i) )
+      }
+      
+      levels = paste( levels, collapse = ";")
+  
+  # login in to server
+  login()
+  
+  # import month by month
+  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+  
+  data = list()
+  data.level = list()
+  for ( i in seq_along(periods.vector) ){
+    
+      print( paste( periods.vector[i] ) )
+    
+    for ( level in seq_along( levels.vector ) ){
+      
+      print( levels.vector[level] )
+  
+    #Assemble the URL ( before starting, double check semicolons for dx dimension )
+    url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                  "&dimension=ou:", levels.vector[level] , ";HfVjCurKxh2" , # All facilities
+                  "&dimension=pe:" , periods.vector[i] ,
+                  "&dimension=dx:" ,
+                  #suspected
+                  "Lt0FqtnHraW.lHl2rmXpHse;Lt0FqtnHraW.SeDaCnHi3m5;" ,
+                  # confirmed
+                  "OoakJhWiyZp.lHl2rmXpHse;OoakJhWiyZp.SeDaCnHi3m5;",
+                  "IxhbkNwhcvE;BwROYFIiXKG;KxT47tbKHsd", # opd summary
+                  "KNrK5VWTZkx;NLKRV7bYbVy" , # population
+                  "&displayProperty=NAME")
+  
+    # Fetch data
+    fetch <- get(url)[[1]] 
+    
+    # if returns a data frame of values (e.g. not 'server error'), then keep
+    if ( is.data.frame( fetch ) )  data.level[[level]] = fetch
+    
+    } 
+    
+    # combine level data
+    data[[i]] = data.table::rbindlist( data.level )
+    
+        print( paste( scales::comma( nrow( data[[i]] ) ) , "records"  ) )
+    
+    }
+  
+  # combine period data
+  data = data.table::rbindlist( data )
+  
+  print( paste( "TOTAL:", scales::comma( nrow( data ) ) , "records"  ) )
+
+  # glimpse(data)
+  
+  saveRDS( data, paste0( folder , params$origin_login_file, 
+                         "_confirmed_suspect_pop_all_levels_2013_17.rds")
+  )
+
+```
+
+link with org units 
+
+```{r read_data}
+
+  data = readRDS( paste0( folder ,params$origin_login_file, 
+                         "_confirmed_suspect_pop_all_levels_2013_17.rds")
+                  ) 
+
+  ous = md.ou %>% 
+    select( id, name, path , featureType, 
+            # active , # is not available in all API ?
+            openingDate, closedDate ) %>%
+    mutate( level = map_dbl( path, 
+                           ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+                           ) %>% factor
+    )
+  
+ 
+```
+
+## Completeness
+
+Completeness by level: 
+
+- crude measure with denom = all orgunits
+
+```{r completeness_crude }
+  
+
+  d.ous = inner_join( data, ous, by = c( 'orgUnit' = 'id' ) )
+                     
+  d.ous.noCat = d.ous %>% 
+  group_by( period, level , orgUnit, dataElement ) %>%
+  summarise( value = sum( as.integer(value), na.rm = TRUE ) ) %>%
+  ungroup
+  
+  s = d.ous.noCat %>%
+    group_by( period, level, dataElement ) %>%
+    summarise( report = n() )  %>% 
+    left_join( count( ous, level ) , by = 'level' ) %>%
+    mutate( completeness = report / n ) 
+  
+  summary( s$completeness )
+  
+    ggplot(s,  aes(x = period, y = completeness, 
+                   group = level, color = level )) +
+    geom_line() +
+    facet_wrap( ~ dataElement ) +
+    ggtitle( 'Crude completeness' )
+  
+```
+
+- Summarise org units open each period
+
+Limitation: Because only one openiningDate is recorded, if clinic was closed, then reoppened, it will be reported as if it was always open.  
+
+```{r open_orgs}
+ 
+ 
+  s = d.ous.noCat %>%
+    mutate( level = as.integer( level )) %>%
+    group_by( period, level, dataElement ) %>%
+    summarise( report = n() )  %>% 
+    inner_join( ous.n , by = c( 'period', 'level' ) ) %>%
+    mutate( completeness = report / n ) 
+  
+  summary( s$completeness )
+  
+    ggplot(s,  aes(x = period, y = completeness, 
+                   group = level, color = level )) +
+    geom_line() +
+    facet_wrap( ~ dataElement )
+  
+```
+
+<!-- NB:  Use API to save charts as favorites??? -->
+
+<!-- Compare with indicators from other programs--tb, hiv, imm... -->
+
+## Trends
+
+<!-- Compare trends among clinics reporting from begining to all clinics, adjusted for.... change in number clinics?, or partial time-period? -->
+
+## Signal to noise ratio 
+
+<!-- https://www.socialresearchmethods.net/kb/expclass.php -->
+
+<!-- http://www.stat.columbia.edu/~gelman/stuff_for_blog/chap20.pdf -->
+
+<!-- 'Observable effect size'  comparing annual cases by region and significant trends -->
+
+# Field visits
+
+- site selection options
