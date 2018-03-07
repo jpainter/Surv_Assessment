@@ -8,8 +8,8 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  origin_login_file: training_kenya
-  cache: TRUE
+  origin_login_file: Malawi
+  cache: FALSE
 ---
 
 ```{r , echo = TRUE, results='hold', message=FALSE, cache=FALSE, warning=FALSE}
@@ -103,7 +103,6 @@ knitr::opts_chunk$set( echo = TRUE ,
 # Metadata 
 
 
-
 ```{r all_meta }
 
   meta_data_file = paste0( folder , params$origin_login_file, 
@@ -135,6 +134,9 @@ knitr::opts_chunk$set( echo = TRUE ,
 
 Results shown are for data accessed on `r format(date_metadata, "%d %B %Y") `.
 
+<!-- System version... -->
+
+
 ## Numbers of each attribute
 
 ```{r attribute_numbers }
@@ -160,7 +162,19 @@ feature_type = function( coordinate ){
 
 }
 
- ous =  md$organisationUnits %>% 
+  # levels
+  levels = character()
+      for ( i in seq_along( md$organisationUnitLevels$id) ){
+    
+        levels =  c(levels, paste0("LEVEL-", i) )
+      }
+      
+      levels = paste( levels, collapse = ";")
+  
+  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+
+
+   ous =  md$organisationUnits %>% 
         select( id, path, name, shortName, coordinates , 
                 created, lastUpdated, openingDate, closedDate 
                 ) %>%
@@ -173,8 +187,10 @@ feature_type = function( coordinate ){
     
 
   table_ou_levels =   count( ous, level ) %>%
-      left_join( select( md$organisationUnitLevel, offlineLevels, name) ,
-                  by = c('level'='offlineLevels') ) %>% 
+      # left_join( select( md$organisationUnitLevel, offlineLevels, name) ,
+      left_join( select( md$organisationUnitLevel, name, level ) ,
+                  # by = c('level'='offlineLevels') ) %>% 
+                  by = c('level'='level') ) %>% 
             filter( !grepl( 'Level', name )  ) %>% # removes generic levels ('Level-8')
       select( level, name, n ) 
   
@@ -192,19 +208,17 @@ feature_type = function( coordinate ){
 ```
 
 
-There, `r sum( map_lgl( md.ou$attributeValues , ~length(.x) > 0 ) )` have an attribute values assigned to OU.  
+There, `r sum( map_lgl( md$organisationUnits$attributeValues , ~length(.x) > 0 ) )` have an attribute values assigned to OU.  
 
 
 ## OU Levels
 
 ```{r ou_levels}
 
- 
-  md.ouLevels =  md$organisationUnitLevels
 
   # levels
       levels = character()
-      for ( i in seq_along( md.ouLevels$id) ){
+      for ( i in seq_along( md$organisationUnitLevels$id) ){
     
         levels =  c(levels, paste0("LEVEL-", i) )
       }
@@ -222,13 +236,10 @@ NB : stratify by attributes such as private, public--if available
 
 ```{r ous_by_level}
 
- ousFeatures = count( ous, level, featureType )
-  
- ousPerLevel = count( ous, level )
 
  count(ous, nchar( openingDate)>0 ) # all have
 
-  table( year( ymd_hms( ous$openingDate )) ) # but some are recent
+ table( year( ymd_hms( ous$openingDate )) ) # but some are recent
 
   
   
@@ -240,7 +251,7 @@ NB : stratify by attributes such as private, public--if available
   
   # number of units per level 
    n.level = list()
-   for ( i in 1:8 ){
+   for ( i in seq_along( levels.vector ) ){
       
       n = map_int( p, ~ous %>%
                       filter( level %in% i  ) %>%
@@ -255,14 +266,18 @@ NB : stratify by attributes such as private, public--if available
    
   # combine into df
   ous.n = data_frame(
-    level = rep( 1:8 , each = length(p) ) ,
-    period = rep( periods.vector, length( levels.vector ) ) ,
+    level = rep( seq_along( levels.vector ) , each = length(p) ) ,
+    period =  rep( periods.vector, length( levels.vector ) ) ,
     n = unlist( n.level )
   ) %>%
-    filter( n > 1 )
+    filter( n > 1 ) 
   
-  ggplot( ous.n,  aes(x = period, y = n )) + geom_point() +
-    facet_wrap( ~level , scales = 'free' )
+  # convert month-Yr to date
+  ous.n$period = fast_strptime( as.character(  ous.n$period ) , "%Y%m") 
+  
+  ggplot( ous.n,  aes(x = period, y = n )) + 
+      geom_point() +
+      facet_wrap( ~level , scales = 'free' )
   
   ###NB Join wiht ou levels for labels
   
@@ -283,14 +298,13 @@ NB  confirm whether all units assigned to category
 
 ## Datasets
 
-NB: Define relevent datasets
 
-```{r datasets 
+```{r datasets }
 
-  md.dataset$name 
+  md$dataSets$name 
   
   # Need to select by manual, eyeball review
-  mal.datasets = md.dataset$name[ c( 19, 20, 32, 37, 40 , 44, 45, 64:65, 67, 116, 117 )]
+  mal.datasets = md$dataSets$name[ c( 19, 20, 32, 37, 40 , 44, 45, 64:65, 67, 116, 117 )]
   
   mal.datasets
 ```
@@ -301,7 +315,7 @@ Count the org units assigned to each form, which is the basis for the number of 
 
   dataset.ous.n = function( dataset ){
   
-    opd.orgs = md.dataset[ md.dataset$name %in% dataset ,
+    opd.orgs = md$dataSets[ md$dataSets$name %in% mal.datasets ,
                            "organisationUnits"][[1]] %>% 
       mutate( dataset = dataset ) %>%
       right_join( ous , by = "id" ) 
@@ -322,13 +336,50 @@ Count the org units assigned to each form, which is the basis for the number of 
   
 ```
 
-- Dataset ous by county....
+<!-- - Dataset ous by county.... -->
 
 ## Data elements and categories
 
 <!-- NB-note which record zero... -->
 
 <!-- NB: Which elements record zero??? -->
+
+<!-- NB: Define relevent datasets and the malaria data elements assigned to them -->
+
+```{r}
+
+de = md$dataElements
+
+# Convert category combo from df to list (ends up with id as character)
+de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
+
+# dataElement vars
+# names( de )
+display.vars = c('name', 'zeroIsSignificant', 'id', 'lastUpdated',
+                             'categoryCombo' )
+
+df_to_list = function()
+
+mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
+conf = grepl( 'conf' , de$name , ignore.case = TRUE )
+sus = grepl( 'susp' , de$name , ignore.case = TRUE )
+
+mal.conf = de[ mal & conf, display.vars ] %>%
+    rename( categoryCombo.id = categoryCombo ) %>%
+    mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+    left_join(  
+        select( md$categoryCombos, id, name, categories ) %>%
+                    rename(categoryCombo.id = id,
+                           categoryCombo = name ,
+                           category.id = categories
+                    ) , 
+                by = 'categoryCombo.id'
+                ) 
+
+kable( mal.conf )
+
+```
+
 
 # Data completeness, reporting trends, 
 
@@ -339,20 +390,10 @@ Count the org units assigned to each form, which is the basis for the number of 
 
 ```{r fetch_data_values, eval=FALSE}
 
-  # levels
-      levels = character()
-      for ( i in seq_along( md.ouLevels$id) ){
-    
-        levels =  c(levels, paste0("LEVEL-", i) )
-      }
-      
-      levels = paste( levels, collapse = ";")
-  
   # login in to server
   login()
   
   # import month by month
-  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
   
   data = list()
   data.level = list()
@@ -409,7 +450,7 @@ link with org units
 
 ```{r read_data}
 
-  data = readRDS( paste0( folder ,params$origin_login_file, 
+  data = readRDS( paste0( folder , params$origin_login_file, 
                          "_confirmed_suspect_pop_all_levels_2013_17.rds")
                   ) 
 
