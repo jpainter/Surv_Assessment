@@ -132,10 +132,7 @@ knitr::opts_chunk$set( echo = TRUE ,
   
 ```
 
-Results shown are for data accessed on `r format(date_metadata, "%d %B %Y") `.
-
-<!-- System version... -->
-
+Results shown are for data accessed on `r format(date_metadata, "%d %B %Y") `.  `r params$origin_login_file` is running DHSI2, version `r md$system$version` (rev. `r md$system$rev`, last updated `r md$system$date`).
 
 ## Numbers of each attribute
 
@@ -296,20 +293,115 @@ NB  confirm whether all units assigned to group
 NB  confirm whether all units assigned to category
 
 
+## Data elements and categories
+
+
+```{r}
+    de = md$dataElements
+    
+    # Convert category combo from df to list (ends up with id as character)
+    de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
+    
+    # dataElement vars
+    # names( de )
+    display.vars = c('name', 'zeroIsSignificant', 'id', 'lastUpdated',
+                                 'categoryCombo' )
+    
+    df_to_list = function()
+    
+    mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
+    conf = grepl( 'conf' , de$name , ignore.case = TRUE )
+    susp = grepl( 'susp' , de$name , ignore.case = TRUE )
+    
+    mal.conf = de[ mal & conf, display.vars ] %>%
+        rename( categoryCombo.id = categoryCombo ) %>%
+        mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+        left_join(  
+            select( md$categoryCombos, id, name, categories ) %>%
+                        rename(categoryCombo.id = id,
+                               categoryCombo = name ,
+                               category.id = categories
+                        ) , 
+                    by = 'categoryCombo.id'
+                    ) 
+    
+    kable( mal.conf, caption = "Confirmed malaria data elements" )
+    
+    mal.susp = de[ mal & susp, display.vars ] %>%
+        rename( categoryCombo.id = categoryCombo ) %>%
+        mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+        left_join(  
+            select( md$categoryCombos, id, name, categories ) %>%
+                        rename(categoryCombo.id = id,
+                               categoryCombo = name ,
+                               category.id = categories
+                        ) , 
+                    by = 'categoryCombo.id'
+                    ) 
+    
+    kable( mal.susp, caption = 'Suspected malaria data elements' )
+
+```
+
+
+NB: more description of total vs details for each data element--need to list 
+
 ## Datasets
 
+<!-- NB: Define relevent datasets and the malaria data elements assigned to them -->
 
 ```{r datasets }
 
-  md$dataSets$name 
-  
-  # Need to select by manual, eyeball review
-  mal.datasets = md$dataSets$name[ c( 19, 20, 32, 37, 40 , 44, 45, 64:65, 67, 116, 117 )]
-  
-  mal.datasets
+  de = md$dataSets %>% 
+    select( id, name, periodType ) %>%
+    mutate( categoryCombo = map( md$dataSets$dataSetElements , 'categoryCombo' ) ,
+            dataElement = map( md$dataSets$dataSetElements , 'dataElement' ) 
+            ) 
+
+   find_dataset_for_element = function( element ){
+       de %>%
+        mutate( 
+            a = map_lgl( dataElement, ~ any( element %in%  .x$id  ) )
+            ) %>%
+        filter( a ) %>% select( id )
+   } 
+   
+   # test
+   # find_dataset_for_element( mal.conf[1, 'id' ] )
+
+   mal.datasets = 
+       data_frame( 
+           mal.conf.id =  mal.conf[, 'id' ] ,
+           mal.conf.name =  mal.conf[, 'name' ] 
+               ) %>%
+       mutate( dataset.id = map(mal.conf.id,  ~find_dataset_for_element( .x ) ) ) %>%
+       unnest %>%
+       left_join( select(md$dataSets, id, name ), by = c('id' = 'id') ) %>%
+       rename( dataset.id = id , dataset.name = name )
+   
+   
+
 ```
 
-Count the org units assigned to each form, which is the basis for the number of expected reports.  If an org unit is not assigned to the dataset, a report is not expected. 
+ org units associated with datasets
+ 
+```{r}
+
+  dataset.ous = md$dataSets %>% 
+    select( id, name ) %>%
+    # filter( name %in% unique( mal.datasets$dataset.name ) ) %>%
+    mutate(
+        ou = map( id, ~md$dataSets[  md$dataSets$id==.x , ]$organisationUnits ) ,
+        num.ou = map_int( ou , ~length( flatten( .x[[1]] ) ) )
+    ) %>%
+    select( -ou )
+
+    
+    
+
+```
+ 
+<!-- Count the org units assigned to each form, which is the basis for the number of expected reports.  If an org unit is not assigned to the dataset, a report is not expected.  -->
 
 ```{r dataset_ous , results = 'asis' }
 
@@ -338,48 +430,6 @@ Count the org units assigned to each form, which is the basis for the number of 
 
 <!-- - Dataset ous by county.... -->
 
-## Data elements and categories
-
-<!-- NB-note which record zero... -->
-
-<!-- NB: Which elements record zero??? -->
-
-<!-- NB: Define relevent datasets and the malaria data elements assigned to them -->
-
-```{r}
-
-de = md$dataElements
-
-# Convert category combo from df to list (ends up with id as character)
-de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
-
-# dataElement vars
-# names( de )
-display.vars = c('name', 'zeroIsSignificant', 'id', 'lastUpdated',
-                             'categoryCombo' )
-
-df_to_list = function()
-
-mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
-conf = grepl( 'conf' , de$name , ignore.case = TRUE )
-sus = grepl( 'susp' , de$name , ignore.case = TRUE )
-
-mal.conf = de[ mal & conf, display.vars ] %>%
-    rename( categoryCombo.id = categoryCombo ) %>%
-    mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
-    left_join(  
-        select( md$categoryCombos, id, name, categories ) %>%
-                    rename(categoryCombo.id = id,
-                           categoryCombo = name ,
-                           category.id = categories
-                    ) , 
-                by = 'categoryCombo.id'
-                ) 
-
-kable( mal.conf )
-
-```
-
 
 # Data completeness, reporting trends, 
 
@@ -387,45 +437,64 @@ kable( mal.conf )
 
 <!-- NB - After getting data, run algorithm for major outliers.  For subsequent charts looking at trends, etc, Replace the outliers so that scale of charts is not distorted to the point where all the true data is not compressed to the bottom of the chart.   -->
 
+## data request 
 
-```{r fetch_data_values, eval=FALSE}
+```{r fetch_data_values }
 
-  # login in to server
-  login()
+  data.file = paste0( folder , 
+                     params$origin_login_file, 
+                     "_datset.rds" )
+
+    if ( exists( data.file ) ){
+        
+          data = readRDS( paste0( folder , 
+                                  params$origin_login_file, 
+                                  "_dataset.rds")
+                      )
+    } else {
   
-  # import month by month
-  
-  data = list()
-  data.level = list()
-  for ( i in seq_along(periods.vector) ){
+    # data elements:
+    de.mal.conf.total = paste( mal.conf$id , collapse  = ";" )
     
-      print( paste( periods.vector[i] ) )
-    
-    for ( level in seq_along( levels.vector ) ){
+    de.mal.susp.total = paste( mal.susp$id , collapse  = ";" )
       
-      print( levels.vector[level] )
-  
-    #Assemble the URL ( before starting, double check semicolons for dx dimension )
-    url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
-                  "&dimension=ou:", levels.vector[level] , ";HfVjCurKxh2" , # All facilities
-                  "&dimension=pe:" , periods.vector[i] ,
-                  "&dimension=dx:" ,
-                  #suspected
-                  "Lt0FqtnHraW.lHl2rmXpHse;Lt0FqtnHraW.SeDaCnHi3m5;" ,
-                  # confirmed
-                  "OoakJhWiyZp.lHl2rmXpHse;OoakJhWiyZp.SeDaCnHi3m5;",
-                  "IxhbkNwhcvE;BwROYFIiXKG;KxT47tbKHsd", # opd summary
-                  "KNrK5VWTZkx;NLKRV7bYbVy" , # population
-                  "&displayProperty=NAME")
-  
-    # Fetch data
-    fetch <- get(url)[[1]] 
+      # login in to server
+      login()
+      
+      # import month by month
+      
+      data = list()
+      data.level = list()
+      for ( i in seq_along(periods.vector) ){
     
-    # if returns a data frame of values (e.g. not 'server error'), then keep
-    if ( is.data.frame( fetch ) )  data.level[[level]] = fetch
-    
-    } 
-    
+          print( paste( periods.vector[i] ) )
+        
+        for ( level in seq_along( levels.vector ) ){
+          
+          print( levels.vector[level] )
+      
+        #Assemble the URL ( before starting, double check semicolons for dx dimension )
+        url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                      "&dimension=ou:", levels.vector[level] , 
+                      "&dimension=pe:" , periods.vector[i] ,
+                      "&dimension=dx:" , 
+                      #suspected
+                      de.mal.susp.total , 
+                      
+                      # confirmed
+                      de.mal.conf.total ,
+                      # opd summary
+                      # "KNrK5VWTZkx;NLKRV7bYbVy" , # population
+                      "&displayProperty=NAME")
+      
+        # Fetch data
+        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+        
+        # if returns a data frame of values (e.g. not 'server error'), then keep
+        if ( is.data.frame( fetch ) )  data.level[[level]] = fetch
+        
+        } 
+        
     # combine level data
     data[[i]] = data.table::rbindlist( data.level )
     
@@ -433,16 +502,17 @@ kable( mal.conf )
     
     }
   
-  # combine period data
-  data = data.table::rbindlist( data )
-  
-  print( paste( "TOTAL:", scales::comma( nrow( data ) ) , "records"  ) )
-
-  # glimpse(data)
-  
-  saveRDS( data, paste0( folder , params$origin_login_file, 
-                         "_confirmed_suspect_pop_all_levels_2013_17.rds")
-  )
+      # combine period data
+      data = data.table::rbindlist( data )
+      
+      print( paste( "TOTAL:", scales::comma( nrow( data ) ) , "records"  ) )
+    
+      # glimpse(data)
+      
+      saveRDS( data, paste0( folder , params$origin_login_file, 
+                             "_datset.rds")
+      )
+}
 
 ```
 
@@ -450,17 +520,13 @@ link with org units
 
 ```{r read_data}
 
-  data = readRDS( paste0( folder , params$origin_login_file, 
-                         "_confirmed_suspect_pop_all_levels_2013_17.rds")
-                  ) 
-
-  ous = md.ou %>% 
+  ous = md$organisationUnits %>% 
     select( id, name, path , featureType, 
             # active , # is not available in all API ?
             openingDate, closedDate ) %>%
     mutate( level = map_dbl( path, 
                            ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
-                           ) %>% factor
+                           ) 
     )
   
  
@@ -478,23 +544,44 @@ Completeness by level:
   d.ous = inner_join( data, ous, by = c( 'orgUnit' = 'id' ) )
                      
   d.ous.noCat = d.ous %>% 
-  group_by( period, level , orgUnit, dataElement ) %>%
-  summarise( value = sum( as.integer(value), na.rm = TRUE ) ) %>%
-  ungroup
+      group_by( period, level , orgUnit, dataElement ) %>%
+      summarise( value = sum( as.integer(value), na.rm = TRUE ) ) %>%
+      ungroup %>%
+      # level names
+      left_join( 
+          select( md$organisationUnitLevels, level, name  ), by = 'level' )
+    
   
   s = d.ous.noCat %>%
-    group_by( period, level, dataElement ) %>%
+    rename( dataElement.id = dataElement , 
+            level.name = name ) %>%
+    group_by( period, level, level.name , dataElement.id ) %>%
     summarise( report = n() )  %>% 
     left_join( count( ous, level ) , by = 'level' ) %>%
-    mutate( completeness = report / n ) 
+    mutate( completeness = report / n ) %>%
+    ungroup() %>%
+    # data element names 
+    left_join( 
+        select( md$dataElements, id, name ) %>% 
+            rename( dataElement.id = id , dataElement = name ) ,
+        by = 'dataElement.id' 
+    )
+  
+  # convert month-Yr to date
+  s$date = fast_strptime( as.character(  s$period ) , "%Y%m") 
   
   summary( s$completeness )
   
-    ggplot(s,  aes(x = period, y = completeness, 
-                   group = level, color = level )) +
+    ggplot(s,  aes(x = date, y = completeness, 
+                   group = level.name , color = level.name )) +
     geom_line() +
-    facet_wrap( ~ dataElement ) +
-    ggtitle( 'Crude completeness' )
+    facet_wrap( ~ dataElement, 
+                labeller = label_wrap_gen(width = 35, multi_line = TRUE)
+                ) +
+    labs( title = 'Crude completeness by data element', 
+             subtitle =  'denominator is current number of all org units' ,
+             caption = params$origin_login_file
+             )
   
 ```
 
