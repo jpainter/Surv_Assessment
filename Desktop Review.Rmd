@@ -4,7 +4,7 @@ output:
   html_document:
     toc: true
     toc_float: true
-    code_folding: show
+    code_folding: hide
 editor_options: 
   chunk_output_type: console
 params:
@@ -270,9 +270,10 @@ NB : stratify by attributes such as private, public--if available
     filter( n > 1 ) 
   
   # convert month-Yr to date
-  ous.n$period = fast_strptime( as.character(  ous.n$period ) , "%Y%m") 
+  d = ous.n 
+  d$date = fast_strptime( as.character(  d$period ) , "%Y%m") 
   
-  ggplot( ous.n,  aes(x = period, y = n )) + 
+  ggplot( d,  aes(x = date, y = n )) + 
       geom_point() +
       facet_wrap( ~level , scales = 'free' )
   
@@ -306,8 +307,6 @@ NB  confirm whether all units assigned to category
     # names( de )
     display.vars = c('name', 'zeroIsSignificant', 'id', 'lastUpdated',
                                  'categoryCombo' )
-    
-    df_to_list = function()
     
     mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
     conf = grepl( 'conf' , de$name , ignore.case = TRUE )
@@ -445,12 +444,10 @@ NB: more description of total vs details for each data element--need to list
                      params$origin_login_file, 
                      "_datset.rds" )
 
-    if ( exists( data.file ) ){
+    if ( file.exists( data.file ) ){
         
-          data = readRDS( paste0( folder , 
-                                  params$origin_login_file, 
-                                  "_dataset.rds")
-                      )
+          data = readRDS( data.file )
+          
     } else {
   
     # data elements:
@@ -509,9 +506,7 @@ NB: more description of total vs details for each data element--need to list
     
       # glimpse(data)
       
-      saveRDS( data, paste0( folder , params$origin_login_file, 
-                             "_datset.rds")
-      )
+      saveRDS( data, data.file )
 }
 
 ```
@@ -540,7 +535,6 @@ Completeness by level:
 
 ```{r completeness_crude }
   
-
   d.ous = inner_join( data, ous, by = c( 'orgUnit' = 'id' ) )
                      
   d.ous.noCat = d.ous %>% 
@@ -551,7 +545,6 @@ Completeness by level:
       left_join( 
           select( md$organisationUnitLevels, level, name  ), by = 'level' )
     
-  
   s = d.ous.noCat %>%
     rename( dataElement.id = dataElement , 
             level.name = name ) %>%
@@ -589,22 +582,23 @@ Completeness by level:
 
 Limitation: Because only one openiningDate is recorded, if clinic was closed, then reoppened, it will be reported as if it was always open.  
 
+
 ```{r open_orgs}
  
  
-  s = d.ous.noCat %>%
-    mutate( level = as.integer( level )) %>%
-    group_by( period, level, dataElement ) %>%
-    summarise( report = n() )  %>% 
-    inner_join( ous.n , by = c( 'period', 'level' ) ) %>%
-    mutate( completeness = report / n ) 
+    # convert month-Yr to date
+  d = ous.n %>%
+      # level names
+      left_join( 
+          select( md$organisationUnitLevels, level, name  ), by = 'level' )
+
+  d$date = fast_strptime( as.character(  d$period ) , "%Y%m") 
   
-  summary( s$completeness )
+  ggplot( d,  aes(x = date, y = n, group = level )) + 
+      geom_line() +
+      facet_wrap( ~name , scales = 'free' )
   
-    ggplot(s,  aes(x = period, y = completeness, 
-                   group = level, color = level )) +
-    geom_line() +
-    facet_wrap( ~ dataElement )
+
   
 ```
 
