@@ -24,6 +24,7 @@ require(XML)
 require(assertthat)
 library( lubridate )
 library( scales )
+library(futile.logger)
 library(tidyverse) 
 
 
@@ -34,20 +35,19 @@ knitr::opts_chunk$set( echo = TRUE ,
 
 ```
 
-
 ```{r, cache = FALSE}
 
   # functions for fetching metadata
 
-  dhis2 = "../HMIS/DHIS2/"  # Location of base files
-
-  source( paste0( dhis2,
-                  'dhis2-data-munging/bootstrap/bootstrap_functions.R' ) )
+  source( 'dhis2_functions.R'  )
   
   # folder for storing review data
+
+  dhis2 = "../HMIS/DHIS2/"  # Location of base files
+ 
   folder = paste0( dhis2 ,  params$origin_login_file  , "/" )
     
-  if ( !file.exists( folder ) ){
+  if ( !dir.exists( folder ) ){
     dir.create( folder ) 
   } 
  
@@ -100,7 +100,7 @@ knitr::opts_chunk$set( echo = TRUE ,
 ```
 
 
-# Metadata 
+# Metadata
 
 
 ```{r all_meta }
@@ -132,7 +132,9 @@ knitr::opts_chunk$set( echo = TRUE ,
   
 ```
 
-Results shown are for data accessed on `r format(date_metadata, "%d %B %Y") `.  `r params$origin_login_file` is running DHSI2, version `r md$system$version` (rev. `r md$system$rev`, last updated `r md$system$date`).
+Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.  
+
+`r params$origin_login_file` is running DHSI2, version `r md$system$version` (rev. `r md$system$rev`), last updated `r md$system$date`.
 
 ## Numbers of each attribute
 
@@ -436,7 +438,7 @@ NB: more description of total vs details for each data element--need to list
 
 <!-- NB - After getting data, run algorithm for major outliers.  For subsequent charts looking at trends, etc, Replace the outliers so that scale of charts is not distorted to the point where all the true data is not compressed to the bottom of the chart.   -->
 
-## data request 
+## data request:  
 
 ```{r fetch_data_values }
 
@@ -511,9 +513,123 @@ NB: more description of total vs details for each data element--need to list
 
 ```
 
+
+## dataset completeness request:  
+
+```{r fetch_dataset_completeness }
+
+  data.file = paste0( folder , 
+                     params$origin_login_file, 
+                     "_datset_completeness.rds" )
+
+    if ( file.exists( data.file ) ){
+        
+          dataset = readRDS( data.file )
+          
+    } else {
+  
+    # datasets
+    datasets =  unique( mal.datasets$dataset.id )
+    
+    reports = c( 'ACTUAL_REPORTS', 'ACTUAL_REPORTS_ON_TIME', 'EXPECTED_REPORTS' )
+      
+      # login in to server
+      login()
+      
+      # import month by month
+      
+      dataset.data = list()
+      dataset.level = list()
+      for ( i in seq_along( datasets ) ){
+    
+          print( paste( datasets[i] ) )
+        
+        for ( level in seq_along( levels.vector ) ){
+          
+          print( levels.vector[level] )
+      
+        #Assemble the URL ( before starting, double check semicolons for dx dimension )
+        url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                      "&dimension=ou:", levels.vector[level] , 
+                      "&dimension=pe:" , paste( periods.vector, collapse = ';') ,
+                      "&dimension=dx:" , 
+                      paste0( datasets[i], ".", reports , collapse = ';')
+                       ,
+                      "&displayProperty=NAME")
+      
+        # Fetch data
+        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+        
+        # if returns a data frame of values (e.g. not 'server error'), then keep
+        if ( is.data.frame( fetch ) )  dataset.level[[level]] = fetch
+        
+        } 
+        
+    # combine level data
+    dataset.data[[i]] = data.table::rbindlist( dataset.level )
+    
+        print( paste( scales::comma( nrow( dataset.data[[i]] ) ) , "records"  ) )
+    
+    }
+  
+      # combine period data
+      dataset = data.table::rbindlist( dataset.data )
+      
+      print( paste( "TOTAL:", scales::comma( nrow( dataset) ) , "records"  ) )
+    
+      # glimpse(data)
+      
+      saveRDS( dataset, data.file )
+}
+
+```
+
+- Dataset 'completeness' (better described as submission)
+
+```{r}
+
+    s = dataset %>%
+        separate( dataElement, c('dataElement.id', 'Category' ), sep = '\\.' ) %>%
+        left_join(  select( ous , id, level) , by = c('orgUnit' = 'id') ) %>%
+        group_by( level, period , dataElement.id , Category ) %>%
+        summarise( value = sum( as.integer( value) ) ) %>%
+        ungroup() %>% 
+        spread( Category, value ) %>%
+        mutate( submitted = ACTUAL_REPORTS / EXPECTED_REPORTS ) %>%
+         # level names
+         left_join( 
+             select( md$organisationUnitLevels, level, name  ), by = 'level' 
+             ) %>%
+        rename( level.name = name ) %>%
+        # data element names 
+        left_join( 
+            select( md$dataSets, id, name ) %>% 
+            rename( dataElement.id = id , dataset = name ) ,
+            by = 'dataElement.id' 
+            )
+
+    # convert month-Yr to date
+    s$date = fast_strptime( as.character(  s$period ) , "%Y%m") 
+  
+    summary( s$submitted )
+  
+    ggplot(s,  aes(x = date, y = submitted, 
+                   group = level.name , color = level.name )) +
+    geom_line() +
+    facet_wrap( ~ dataset, 
+                labeller = label_wrap_gen(width = 35, multi_line = TRUE)
+                ) +
+    labs( title = 'Dataset submission by level', 
+             subtitle =  'denominator is expected reports' ,
+             caption = params$origin_login_file
+             )
+    
+```
+
+
 link with org units 
 
-```{r read_data}
+```{r read_dataset_completeness}
 
   ous = md$organisationUnits %>% 
     select( id, name, path , featureType, 
@@ -532,6 +648,22 @@ link with org units
 Completeness by level: 
 
 - crude measure with denom = all orgunits
+
+link with org units 
+
+```{r read_data}
+
+  ous = md$organisationUnits %>% 
+    select( id, name, path , featureType, 
+            # active , # is not available in all API ?
+            openingDate, closedDate ) %>%
+    mutate( level = map_dbl( path, 
+                           ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+                           ) 
+    )
+  
+ 
+```
 
 ```{r completeness_crude }
   
