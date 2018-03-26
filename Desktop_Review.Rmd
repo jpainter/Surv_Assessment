@@ -15,28 +15,25 @@ params:
 # **Desktop Review: `r toupper( params$origin_login_file )`**
 
 
-```{r packages, echo = TRUE, results='hold', message=FALSE, cache=FALSE, warning=FALSE}
+```{r packages, echo = TRUE, cache=FALSE, warning=FALSE, include = FALSE }
 
 
-library( rlist )
-library(knitr)
-library(kableExtra)
-library(xts)
-library(leaflet)
-library(RColorBrewer)
-library(DT)
-library( dygraphs )
-require(httr)
-require(jsonlite)
-require(XML)
-require(assertthat)
-library( lubridate )
-library( scales )
-library( RcppRoll )
-library(zoo)
-library( gridExtra )
-library(futile.logger)
-library(tidyverse) 
+# list of required packages
+    package.list = c("rlist", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "tidyverse" )
+
+# Function to test if package is installed 
+    pkgTest <- function( package.list = package.list ){
+        
+        missing.packages = setdiff( package.list , rownames(installed.packages())) 
+        if ( length( missing.packages ) > 0 ) install.packages( missing.packages ) 
+    }
+
+
+# Test if packages loaded
+    pkgTest( package.list )
+
+# load the packages
+    lapply( package.list, suppressMessages( require ) , character.only = TRUE)
 
 
 knitr::opts_chunk$set( echo = params$echo ,
@@ -149,16 +146,20 @@ knitr::opts_chunk$set( echo = params$echo ,
 
 Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.    
 
-`r params$origin_login_file` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`, last updated `r md$system$date`).
+`r params$origin_login_file` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`), last updated `r md$system$date`.
 
 ## Numbers of each attribute
 
 ```{r attribute_numbers }
 
- map_df( md[names(md)], ~length(.x$id) ) %>% t %>% comma %>% 
-    kable( align = 'r' )
+ metadata_attributes = map_df( md[names(md)], ~length(.x$id) ) %>% 
+    gather( attribute, value ) %>% # columns to rows
+    mutate( value = comma( value ) )  %>%  # format numbers
+    kable( align = c( 'l', 'r' ), 'html' ) %>% 
+    kable_styling( bootstrap_options = c("striped", "hover") ) %>%
+        column_spec(1, bold = T) 
 
-
+  metadata_attributes
 
 ```
 
@@ -491,6 +492,7 @@ Count the org units assigned to each form, which is the basis for the number of 
 
 ```{r dataset_ous , results = 'asis' }
 
+# function to create html table of a dataset's features
   dataset.ous.n = function( dataset ){
   
     opd.orgs = md$dataSets[ md$dataSets$name %in% dataset ,
@@ -516,10 +518,9 @@ Count the org units assigned to each form, which is the basis for the number of 
     return(t)
   }
 
- # map( mal.datasets, ~dataset.ous.n(.x) ) 
- 
+# Create table for each dataset
  for ( i in 1:nrow( mal.datasets ) ){
-   print( dataset.ous.n( mal.datasets[i, 'Name'] ) )
+   cat( dataset.ous.n( mal.datasets[i, 'Name'] ) )
  } 
  
   
