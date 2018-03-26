@@ -8,6 +8,7 @@ library(stlplus) # for handling time-series with missing data
 library( seasonal )
 library( seasonalview )
 library(magrittr)
+library(gridExtra)
 library( tidyverse )
 library( lubridate )
 
@@ -117,7 +118,7 @@ library( lubridate )
 
   gseas
 
-# function ggdsc ####
+# function ggdsc, extracts remainder to calculate sd ####
 ggRemainder = function( data , method = "stl" ){
   
   start = c( min( year( data$date ) ), min( month( data$date ) ) )
@@ -131,28 +132,68 @@ ggRemainder = function( data , method = "stl" ){
   # extract remainder data
   irr.df = layer_data( gseas, 1) %>% filter( PANEL %in% 4)
 
-  gg.irr = ggplot( irr.df , aes( x, y ) ) + geom_line() +
-    stat_rollapplyr( width = 12, FUN = function(x) mean(x) + sd(x) , color = 'green') 
+  gg.irr = ggplot( irr.df , aes( x, y ) ) + 
+      geom_line() +
+      # stat_rollapplyr( width = 12, FUN = function(x) mean(x) + sd(x) , color = 'green')  +
+      stat_rollapplyr( width = 12, FUN = function(x) sd(x) , color = 'blue') 
 
+  # extract rolling sd and model with loess
   gg.irr.df = layer_data( gg.irr , 2 ) 
   gg.irr.loess = loess( y ~ x, gg.irr.df , span = 12,
                         control=loess.control(surface="direct")
                         )
- 
+
+  # use loess model of sd to get data points for plotting
   gg.irr.loess.pred = data.frame( x = gg.irr.df$x ,
                                   y = predict( gg.irr.loess, gg.irr.df$x )
   )
   
   # redo plot with smoothed values
-  gg.irr.loess = ggplot( irr.df , aes( x, y ) ) +
+  irr.loess = ggplot( gg.irr.df , aes( x, y ) ) +
     geom_line() +
     geom_line( data = gg.irr.loess.pred , aes( x, y ), color = 'blue' ) +
-    ggtitle( method )
+    labs( title = "Rolling SD" ,  subtitle = method )
   
-  gg.irr.loess
- } 
+  irr.loess
+} 
   
-  ggRemainder(sample2, method = 'seas')
+  # test
+  ggRemainder(sample, method = 'decompose')
+  
+  # show all
+  for (method in c("stl", "decompose",
+                     "seas")){
+      p = ggsdc( sample, aes(x = date, y = value ),
+             method = method, start = start ,
+             frequency = 12, s.window = 12, type = "multiplicative" ) + 
+          geom_line() + 
+          stat_rollapplyr( width = 12, FUN = function(x) sd(x) , color = 'blue') +
+          labs(title = "DHIS2 Decomposition", subtitle = method ) + 
+          theme_minimal()
+      
+      assign( paste0( "p.", method), p)
+      
+      # extract rolling sd and model with loess
+      p.sd.loess = loess( y ~ x, filter( p$data, component == 'irregular' ) )
+      
+      # use loess model of sd to get data points for plotting
+      p.sd =  filter(p$data, component == 'irregular') %>%
+          group_by( component ) %>% 
+          mutate( sd = rollapplyr( y , width = 12, align = 'right' ,
+                                  FUN = function(x) sd(x), na.pad = TRUE ) 
+                  )
+      
+      p.sd.loess = loess( y ~ x, p.sd , span = 12,
+                          control=loess.control(surface="direct")
+      )
+  }
+  grid.arrange( p.stl, p.decompose, p.seas, ncol = 3)
+  
+  
+  
+  
+
+
   
 # Mimic ggsdc with seas ####
   # decompose sample data

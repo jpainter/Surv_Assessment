@@ -1,0 +1,1265 @@
+---
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+params:
+  origin_login_file: training_kenya
+  cache: TRUE
+  echo: FALSE
+---
+
+# **Desktop Review: `r toupper( params$origin_login_file )`**
+
+
+```{r packages, echo = TRUE, results='hold', message=FALSE, cache=FALSE, warning=FALSE}
+
+
+library( rlist )
+library(knitr)
+library(kableExtra)
+library(xts)
+library(leaflet)
+library(RColorBrewer)
+library(DT)
+library( dygraphs )
+require(httr)
+require(jsonlite)
+require(XML)
+require(assertthat)
+library( lubridate )
+library( scales )
+library( RcppRoll )
+library(zoo)
+library( gridExtra )
+library(futile.logger)
+library(tidyverse) 
+
+
+knitr::opts_chunk$set( echo = params$echo ,
+                       fig.width =  8, 
+                       # knitr.table.format = "html" ,
+                       cache = params$cache # TRUE for testing; FALSE for production
+                       )
+
+```
+
+
+```{r sources, cache = FALSE}
+
+  # functions for fetching metadata
+
+  source( 'dhis2_functions.R'  )
+  
+  # folder for storing review data
+
+  dhis2 = "../HMIS/DHIS2/"  # Location of base files
+  # dhis2 = ""  # Location of base files
+ 
+  folder = paste0( dhis2 ,  params$origin_login_file  , "/" )
+    
+  if ( !dir.exists( folder ) ){
+    dir.create( folder ) 
+  } 
+ 
+  
+  # login shortcut
+   login = function(){
+       source( paste0( folder, 
+                       tolower( params$origin_login_file ) , 
+                       "_login")  )
+       loginDHIS2( baseurl, username, password)
+   }
+ 
+
+```
+
+<!-- Define the year-month time periods for the review -->
+
+<!-- NB:  What about IDSR with weeks?  -->
+
+```{r date_strings }
+
+ # Function to create string of dates
+  date_code = function( years = 2013:2017 , months = 1:12 ){
+    period = character()
+    
+    for (year in years ){
+      for (month in seq_along(months)){
+        this_period = paste0( ";", 
+                         year , 
+                         ifelse( month < 10 , paste0("0", month) , month )
+        )
+        period =  c(period, this_period )
+      }
+    }
+    
+    # remove first ;
+    period =  paste( period, collapse = "")
+    period = substring( period, 2, nchar(period))
+    
+    return( period )
+  }
+ 
+  periods = date_code() # default: 2013-2017
+  # periods = date_code( 2017, 1 ) # January 2017 only
+  
+  # as character vector
+  periods.vector = strsplit( periods, ";" , fixed = TRUE )[[1]]
+
+  
+```
+
+
+
+# Metadata 
+
+
+```{r all_meta }
+
+  meta_data_file = paste0( folder , params$origin_login_file, 
+                           "_metadata.rds" ) 
+
+  if ( !file.exists( meta_data_file) ){
+   
+    # login in to server
+    login()
+  
+    md = metadataDHIS2( baseurl, 'all' )
+    
+    # glimpse( md )
+    
+    write_rds( md, meta_data_file )
+    
+  } else {
+      
+       md = read_rds( meta_data_file )
+  }
+
+  # re-order alaphabetically to be easier to browse in View
+  md = md[order(names(md))]
+  
+  # Retrieve access data 
+  date_metadata = file.info( meta_data_file )$ctime 
+  
+```
+
+Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.    
+
+`r params$origin_login_file` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`, last updated `r md$system$date`).
+
+## Numbers of each attribute
+
+```{r attribute_numbers }
+
+ map_df( md[names(md)], ~length(.x$id) ) %>% t %>% comma %>% 
+    kable( align = 'r' )
+
+
+
+```
+
+## Organizational Units and levels
+
+```{r ou_and_levels }
+
+feature_type = function( coordinate ){
+    n = length( gregexpr( '[' , coordinate , fixed = TRUE)[[1]] )
+    
+    if ( is.na( coordinate ) ) return(NA)
+    if (n==1) return('Point') 
+    if (n>1) return('Polygon') 
+    
+
+}
+
+  # levels
+  levels = character()
+      for ( i in seq_along( md$organisationUnitLevels$id) ){
+    
+        levels =  c(levels, paste0("LEVEL-", i) )
+      }
+      
+      levels = paste( levels, collapse = ";")
+  
+  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+
+
+   ous =  md$organisationUnits %>% 
+        select( id, path, name, shortName, coordinates , 
+                created, lastUpdated, openingDate, closedDate 
+                ) %>% as.tibble %>%
+        mutate( 
+          level = map_int( path, 
+                               ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+                               ) ,
+          feature = map_chr( coordinates, ~feature_type(.x) )
+        )
+    
+
+  table_ou_levels =   count( ous, level ) %>%
+      # left_join( select( md$organisationUnitLevel, offlineLevels, name) ,
+      left_join( select( md$organisationUnitLevel, name, level ) ,
+                  # by = c('level'='offlineLevels') ) %>% 
+                  by = c('level'='level') ) %>% 
+            filter( !grepl( 'Level', name )  ) %>% # removes generic levels ('Level-8')
+      select( level, name, n ) 
+  
+  
+  # Add feature types
+  ousFeatures = count( ous, level, feature ) %>% 
+      spread(  feature, n )
+  
+  feature_table = left_join( table_ou_levels, 
+                            ousFeatures, by = 'level' ) %>%
+      mutate( n = comma(n) ) 
+    
+  kable( feature_table, align = c( 'l', 'l', 'r' ) ) 
+
+```
+
+
+There, `r sum( map_lgl( md$organisationUnits$attributeValues , ~length(.x) > 0 ) )` have an attribute values assigned to OU.  
+
+
+## OU Levels
+
+```{r ou_levels}
+
+
+  # levels
+      levels = character()
+      for ( i in seq_along( md$organisationUnitLevels$id) ){
+    
+        levels =  c(levels, paste0("LEVEL-", i) )
+      }
+      
+      levels = paste( levels, collapse = ";")
+  
+  # import month by month
+  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+  
+```
+
+summarise enumerated features by level
+
+NB : stratify by attributes such as private, public--if available
+
+```{r ous_by_level}
+
+
+ count(ous, nchar( openingDate)>0 ) # all have
+
+ table( year( ymd_hms( ous$openingDate )) ) # but some are recent
+
+  
+  
+  n_distinct( ous$name )
+
+  p = strsplit( periods , ";" , fixed = TRUE )[[1]]
+  p = paste0( p , "01")
+  p = ymd( p )
+  
+  # number of units per level 
+   n.level = list()
+   for ( i in seq_along( levels.vector ) ){
+      
+      n = map_int( p, ~ous %>%
+                      filter( level %in% i  ) %>%
+                      summarise(
+                        n = sum( openingDate < .x & 
+                                   ifelse( !is.na(closedDate), 
+                                           closedDate > .x, TRUE )
+                                 ) ) %>% .$n
+      )
+      n.level[[i]] = n
+   }
+   
+  # combine into df
+  ous.n = data_frame(
+    level = rep( seq_along( levels.vector ) , each = length(p) ) ,
+    period =  rep( periods.vector, length( levels.vector ) ) ,
+    n = unlist( n.level )
+  ) %>%
+    filter( n > 1 ) 
+  
+  # convert month-Yr to date
+  d = ous.n %>%
+      # level names
+      left_join( 
+          select( md$organisationUnitLevels, level, name  ) , 
+          by = 'level' ) %>%
+    mutate( 
+        name = fct_reorder( name, level )
+        )
+
+  d$date = fast_strptime( as.character(  d$period ) , "%Y%m") 
+  
+  ggplot( d,  aes(x = date, y = n, group = level )) + 
+      geom_line() +
+      facet_wrap( ~name , scales = 'free' )
+  
+  
+  ###NB Join wiht ou levels for labels
+  
+```
+
+NB: not all ou will be assigned to a dataset, and some may be duplicates...
+## OU unit groups and group sets ?   
+
+  - private / public
+  - elimination / control 
+  
+NB  confirm whether all units assigned to group
+
+## Categories linked with orgUnits
+  
+NB  confirm whether all units assigned to category
+
+
+## Data elements and categories
+
+NB: Focus on data elements for malaria, patients, ...
+
+
+```{r}
+    de = md$dataElements
+    
+    # Convert category combo from df to list (ends up with id as character)
+    de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
+    
+    # dataElement vars
+    # names( de )
+    display.vars = c('name', 'zeroIsSignificant', 'id', 'lastUpdated',
+                                 'categoryCombo' )
+    
+    mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
+    conf = grepl( 'conf' , de$name , ignore.case = TRUE )
+    susp = grepl( 'susp' , de$name , ignore.case = TRUE )
+    patients = grepl( 'patient' , de$name , ignore.case = TRUE )
+    
+    mal.conf = de[ mal & conf, display.vars ] %>%
+        rename( categoryCombo.id = categoryCombo ) %>%
+        mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+        
+        # categoryCombos
+        left_join(  
+            select( md$categoryCombos, id, name, categories ) %>%
+                        rename(categoryCombo.id = id,
+                               categoryCombo = name ,
+                               category.id = categories
+                        ) , 
+                    by = 'categoryCombo.id'
+                    ) %>%
+    
+        # dataElementGroups
+        left_join( 
+            md$dataElementGroups %>% 
+                select( name, dataElements) %>%
+                rename( Group = name ) %>% 
+                unnest ,
+            by = 'id'
+            )
+    
+    
+    
+    kable( select(mal.conf , name, Group, zeroIsSignificant, lastUpdated, categoryCombo ), 
+           'html' ,
+           caption = "Confirmed malaria data elements" )  %>%
+        kable_styling(bootstrap_options = c("striped", "hover")) %>%
+        column_spec(1, bold = T) 
+    
+    mal.susp = de[ mal & susp, display.vars ] %>%
+        rename( categoryCombo.id = categoryCombo ) %>%
+        mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+        left_join(  
+            select( md$categoryCombos, id, name, categories ) %>%
+                        rename(categoryCombo.id = id,
+                               categoryCombo = name ,
+                               category.id = categories
+                        ) , 
+                    by = 'categoryCombo.id'
+                    ) 
+    
+    kable( select( mal.susp, name, zeroIsSignificant, lastUpdated, categoryCombo ), 
+           'html' , 
+           caption = 'Suspected malaria data elements' ) %>%
+        kable_styling(bootstrap_options = c("striped", "hover")) %>%
+        column_spec(1, bold = T) 
+
+```
+
+
+NB: more description of total vs details for each data element--need to list 
+
+## Datasets
+
+
+```{r datasets }
+
+  # All dataElements and categoryCombos associated with each dataset
+  de = md$dataSets %>% 
+    select( id, name, periodType ) %>%
+    mutate( categoryCombo = map( md$dataSets$dataSetElements ,
+                                 'categoryCombo' ) ,
+            dataElement = map( md$dataSets$dataSetElements , 
+                               'dataElement' ) 
+            ) 
+
+   find_dataset_for_element = function( element ){
+       de %>%
+        mutate( 
+            a = map_lgl( dataElement, ~ any( element %in%  .x$id  ) )
+            ) %>%
+        filter( a ) %>% select( id )
+   } 
+   
+   # test
+   # find_dataset_for_element( mal.conf[1, 'id' ] )
+
+   
+   # Datasets with malaria dataElements included
+   
+       # data elements:
+    de.mal = bind_rows( mal.conf ,  mal.susp  ) 
+    
+    # NB : There may be duplicate rows in de.mal because the same elements belong to multiple groups.
+   # Compare with de.mal %>% select(-Group) %>% distinct()
+   
+    
+   mal.datasets.de = de.mal %>% 
+       select( id, name ) %>%
+       distinct() %>%
+       rename(
+           dataElement.id = id ,
+           dataElement.name = name
+       ) %>% 
+       # data_frame( 
+       #     dataElement.id =  de.mal[, 'id' ] ,
+       #     dataElement.name =  de.mal[, 'name' ] 
+       #         ) %>%
+       mutate( 
+           dataset.id = map(
+               dataElement.id,  ~find_dataset_for_element( .x ) ) 
+           ) %>%
+       unnest %>%
+       left_join( select(md$dataSets, id, name, periodType ), 
+                  by = c('id' = 'id') ) %>%
+       rename( dataset.id = id , dataset.name = name ) %>%
+       arrange( dataElement.name, dataset.name)
+   
+   
+   # just list of malaria datasets
+   mal.datasets = mal.datasets.de %>%
+       group_by( dataset.id , periodType ) %>%
+       summarise( Name = unique( dataset.name ))%>%
+       rename( id = dataset.id, Frequency = periodType ) %>%
+       select( Name, id, Frequency) %>%
+       arrange( Name )
+   
+   
+   kable( mal.datasets.de, 'html' ) %>% 
+       kable_styling(bootstrap_options = c("striped", "hover"))%>%
+        column_spec(1, bold = T) 
+   
+   # NB TODO:  Table of data groups (because it is removed from mal.datasets, to avoid duplicates)
+
+```
+
+
+ 
+```{r}
+
+  dataset.ous = md$dataSets %>% 
+    select( id, name ) %>%
+    # filter( name %in% unique( mal.datasets$dataset.name ) ) %>%
+    mutate(
+        ou = map( id, ~md$dataSets[  md$dataSets$id==.x , ]$organisationUnits ) ,
+        num.ou = map_int( ou , ~length( flatten( .x[[1]] ) ) )
+    ) %>%
+    select( -ou )
+
+    
+    
+
+```
+ 
+Count the org units assigned to each form, which is the basis for the number of expected reports.  If an org unit is not assigned to the dataset, a report is not expected. 
+
+```{r dataset_ous , results = 'asis' }
+
+  dataset.ous.n = function( dataset ){
+  
+    opd.orgs = md$dataSets[ md$dataSets$name %in% dataset ,
+                           c( 'name', "organisationUnits" ) ] %>% 
+      rename( dataset = name ) %>%
+      unnest %>% 
+      right_join( select( ous , id, name, level ) , by = "id" )  %>%
+      rename( ous = name ) %>%
+      # level names
+      left_join( 
+          select( md$organisationUnitLevels, level, name  ), 
+          by = 'level' ) %>%
+      rename( levelName = name )
+    
+
+    t = count( opd.orgs, level, levelName, dataset ) %>% 
+      spread( dataset, n ) %>%
+      rename( Unassigned = `<NA>` ) %>%
+      kable( "html", caption = dataset ) %>%
+      kable_styling(bootstrap_options = c("striped", "hover"))%>%
+        column_spec(1, bold = T) 
+    
+    return(t)
+  }
+
+ # map( mal.datasets, ~dataset.ous.n(.x) ) 
+ 
+ for ( i in 1:nrow( mal.datasets ) ){
+   print( dataset.ous.n( mal.datasets[i, 'Name'] ) )
+ } 
+ 
+  
+```
+
+<!-- - Dataset ous by county.... -->
+
+
+# Data, Data completeness, reporting trends 
+
+
+
+<!-- NB - After getting data, run algorithm for major outliers.  For subsequent charts looking at trends, etc, Replace the outliers so that scale of charts is not distorted to the point where all the true data is not compressed to the bottom of the chart.   -->
+
+```{r fetch_data_values }
+
+  data.file = paste0( folder , 
+                     params$origin_login_file, 
+                     "_dataset.rds" )
+
+    if ( file.exists( data.file ) ){
+        
+          data = readRDS( data.file )
+          
+    } else {
+  
+    # data elements:
+    de.mal.conf.total = paste( mal.conf$id , collapse  = ";" )
+    
+    de.mal.susp.total = paste( mal.susp$id , collapse  = ";" )
+      
+      # login in to server
+      retry( login() )
+      
+      # import month by month
+      
+      data = list()
+      data.level = list()
+      for ( i in seq_along(periods.vector) ){
+    
+          print( paste( periods.vector[i] ) )
+        
+        for ( level in seq_along( levels.vector ) ){
+          
+          print( levels.vector[level] )
+      
+        #Assemble the URL ( before starting, double check semicolons for dx dimension )
+        url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                      "&dimension=ou:", levels.vector[level] , 
+                      "&dimension=pe:" , periods.vector[i] ,
+                      "&dimension=dx:" , 
+                      #suspected
+                      de.mal.susp.total , ";" ,
+                      
+                      # confirmed
+                      de.mal.conf.total ,
+                      # opd summary
+                      # "KNrK5VWTZkx;NLKRV7bYbVy" , # population
+                      "&displayProperty=NAME")
+      
+        # Fetch data
+        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+        
+        # if returns a data frame of values (e.g. not 'server error'), then keep
+        if ( is.data.frame( fetch ) )  data.level[[level]] = fetch
+        
+        } 
+        
+    # combine level data
+    data[[i]] = data.table::rbindlist( data.level )
+    
+        print( paste( scales::comma( nrow( data[[i]] ) ) , "records"  ) )
+    
+    }
+  
+      # combine period data
+      data = data.table::rbindlist( data )
+      
+      print( paste( "TOTAL:", scales::comma( nrow( data ) ) , "records"  ) )
+    
+      # glimpse(data)
+      
+      saveRDS( data, data.file )
+}
+
+```
+
+
+## Dataset completeness 
+
+Values shown are for the periods from `r min(periods.vector)` to `r max(periods.vector)`.
+
+```{r fetch_dataset_completeness  }
+
+  data.file = paste0( folder , 
+                     params$origin_login_file, 
+                     "_datset_completeness.rds" )
+
+    # open if already exists 
+    if ( file.exists( data.file ) ){
+        
+          dataset = readRDS( data.file )  %>% as.tibble 
+          
+    } else {
+  
+    # datasets
+    datasets =  unique( mal.datasets$id )
+    
+    reports = c( 'ACTUAL_REPORTS', 'ACTUAL_REPORTS_ON_TIME', 'EXPECTED_REPORTS' )
+      
+      # login in to server
+      login()
+      
+      # import month by month
+      
+      dataset.data = list()
+      dataset.level = list()
+      for ( i in seq_along( datasets ) ){
+    
+          print( paste( datasets[i] ) )
+        
+        for ( level in seq_along( levels.vector ) ){
+          
+          print( levels.vector[level] )
+      
+        #Assemble the URL ( before starting, double check semicolons for dx dimension )
+        url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                      "&dimension=ou:", levels.vector[level] , 
+                      "&dimension=pe:" , paste( periods.vector, collapse = ';') ,
+                      "&dimension=dx:" , 
+                      paste0( datasets[i], ".", reports , collapse = ';')
+                       ,
+                      "&displayProperty=NAME")
+      
+        # Fetch data
+        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+        
+        # if returns a data frame of values (e.g. not 'server error'), then keep
+        if ( is.data.frame( fetch ) )  dataset.level[[level]] = fetch
+        
+        } 
+        
+    # combine level data
+    dataset.data[[i]] = data.table::rbindlist( dataset.level )
+    
+        print( paste( scales::comma( nrow( dataset.data[[i]] ) ) , "records"  ) )
+    
+    }
+  
+      # combine period data
+      dataset = data.table::rbindlist( dataset.data ) %>% as.tibble
+      
+      print( paste( "TOTAL:", scales::comma( nrow( dataset) ) , "records"  ) )
+    
+      # glimpse(data)
+      
+      saveRDS( dataset, data.file )
+    }
+
+    d = dataset %>% 
+        separate( col = dataElement , into = c('dataSet', 'Category' ), sep = "\\.") %>%
+        inner_join( mal.datasets , by = c( 'dataSet' = 'id') ) %>% 
+        count( Name, Category ) %>%
+        spread( Category, n )
+    d
+        
+
+```
+
+- Dataset 'completeness' (better described as submission)
+
+```{r data_submission}
+
+    s = dataset %>%
+        separate( dataElement, 
+                  c('dataElement.id', 'Category' ), sep = '\\.' 
+                  ) %>%
+        left_join(  select( ous , id, level) , 
+                    by = c('orgUnit' = 'id') ) %>%
+        group_by( level, period , dataElement.id , Category ) %>%
+        summarise( value = sum( as.integer( value) ) ) %>%
+        ungroup() %>% 
+        spread( Category, value ) %>%
+        mutate( 
+            submitted = ACTUAL_REPORTS / EXPECTED_REPORTS ,
+            onTime = ACTUAL_REPORTS_ON_TIME / EXPECTED_REPORTS 
+            ) %>%
+         # level names
+         left_join( 
+             select( md$organisationUnitLevels, level, name  ), 
+             by = 'level' 
+             ) %>%
+        mutate( 
+            name = fct_reorder( name, level )
+        ) %>%
+        rename( level.name = name ) %>%
+    
+        # data element names 
+        left_join( 
+            select( md$dataSets, id, name ) %>% 
+            rename( dataElement.id = id , dataset = name ) ,
+            by = 'dataElement.id' 
+            )
+
+    # convert month-Yr to date
+    s$date = fast_strptime( as.character(  s$period ) , "%Y%m") 
+  
+    # summary( s$submitted )
+  
+
+```
+
+```{r submission_charts}
+
+# expected number
+    ggplot(s,  aes(x = date, y = EXPECTED_REPORTS, 
+                   group = level.name , color = level.name )) +
+    geom_line() +
+    facet_wrap( ~ dataset, 
+                labeller = label_wrap_gen(width = 25, multi_line = TRUE)
+                ) +
+    labs( title = 'Expected reports by level', 
+             subtitle =  '' ,
+             caption = params$origin_login_file
+             )
+
+# submission rate
+    ggplot(s,  aes(x = date, y = submitted, 
+                   group = level.name , color = level.name )) +
+    geom_line() +
+    facet_wrap( ~ dataset, 
+                labeller = label_wrap_gen(width = 25, multi_line = TRUE)
+                ) +
+    labs( title = 'Dataset submission rate by level', 
+             subtitle =  'denominator is expected reports' ,
+             caption = params$origin_login_file
+             )
+    
+# onTime rate
+    ggplot(s,  aes(x = date, y = onTime, 
+                   group = level.name , color = level.name )) +
+    geom_line() +
+    facet_wrap( ~ dataset, 
+                labeller = label_wrap_gen(width = 25, multi_line = TRUE)
+                ) +
+    labs( title = 'Dataset submission-on-time rate, by level', 
+             subtitle =  'denominator is expected reports' ,
+             caption = params$origin_login_file
+             )
+    
+```
+
+link with org units 
+
+```{r read_dataset_completeness }
+
+  ous_complete = md$organisationUnits %>% 
+    select( id, name, path , featureType, 
+            # active , # is not available in all API ?
+            openingDate, closedDate ) %>%
+    mutate( level = map_dbl( path, 
+                           ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+                           ) 
+    )
+  
+ 
+```
+
+## Completeness
+
+Completeness by level: 
+
+- crude measure with denom = all orgunits
+
+link with org units 
+
+```{r read_data }
+
+  ous = md$organisationUnits %>% 
+    select( id, name, path , featureType, 
+            # active , # is not available in all API ?
+            openingDate, closedDate ) %>%
+    mutate( level = map_dbl( path, 
+                           ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+                           ) 
+    )
+  
+ 
+```
+
+```{r completeness_crude }
+  
+  d.ous = inner_join( data, ous, by = c( 'orgUnit' = 'id' ) )
+                     
+  d.ous.noCat = d.ous %>% 
+      group_by( period, level , orgUnit, dataElement ) %>%
+      summarise( value = sum( as.integer(value), na.rm = TRUE ) ) %>%
+      ungroup %>%
+      # level names
+      left_join( 
+          select( md$organisationUnitLevels, level, name  ), by = 'level' )
+    
+  s = d.ous.noCat  %>%
+    mutate( 
+        name = fct_reorder( name, level )
+        ) %>%
+    rename( dataElement.id = dataElement , 
+            level.name = name ) %>%
+    group_by( period, level, level.name , dataElement.id ) %>%
+    summarise( report = n() )  %>% 
+    left_join( count( ous, level ) , by = 'level' ) %>%
+    mutate( completeness = report / n ) %>%
+    ungroup() %>%
+    # data element names 
+    left_join( 
+        select( md$dataElements, id, name ) %>% 
+            rename( dataElement.id = id , dataElement = name ) ,
+        by = 'dataElement.id' 
+    )
+  
+  # convert month-Yr to date
+  s$date = fast_strptime( as.character(  s$period ) , "%Y%m") 
+  
+  summary( s$completeness )
+  
+    ggplot(s,  aes(x = date, y = completeness, 
+                   group = level.name , color = level.name )) +
+    geom_line() +
+    facet_wrap( ~ dataElement, 
+                labeller = label_wrap_gen(width = 35, multi_line = TRUE)
+                ) +
+    labs( title = 'Crude completeness by data element', 
+             subtitle =  'denominator is current number of all org units' ,
+             caption = params$origin_login_file
+             )
+  
+```
+
+- Summarise org units open each period
+
+Limitation: Because only one openiningDate is recorded, if clinic was closed, then reoppened, it will be reported as if it was always open.  
+
+
+```{r open_orgs}
+ 
+ 
+    # convert month-Yr to date
+  d = ous.n %>%
+      # level names
+      left_join( 
+          select( md$organisationUnitLevels, level, name  ) , 
+          by = 'level' ) %>%
+    mutate( 
+        name = fct_reorder( name, level )
+        )
+
+  d$date = fast_strptime( as.character(  d$period ) , "%Y%m") 
+  
+  ggplot( d,  aes(x = date, y = n, group = level )) + 
+      geom_line() +
+      facet_wrap( ~name , scales = 'free' )
+  
+
+  
+```
+
+<!-- NB:  Use API to save charts as favorites??? -->
+
+<!-- Compare with indicators from other programs--tb, hiv, imm... -->
+
+## Locations of Org Units with number of confirmed malaria cases 
+
+
+```{r}
+# orgUnits that are points (likely HF), and open
+clinics = md$organisationUnits %>% 
+    select( id, name, coordinates, openingDate, closedDate, path  ) %>%
+    as.tibble %>% 
+    mutate( 
+        feature_type = map_chr( coordinates, ~feature_type(.x) ) ,
+        # remove quotation marks
+        coordinates = gsub('"', '', coordinates)
+        ) %>%
+    filter( feature_type %in% 'Point') %>%
+    separate( coordinates, c('long', 'lat'), sep = ',', remove = FALSE ) %>% 
+    filter( !is.na(long), !is.na(lat), is.na( closedDate ) ) %>%
+    mutate(
+        long = as.numeric(  substr(  long, 2, nchar(long) ) ) ,
+        lat =  as.numeric(  substr(  lat, 1, nchar(lat)-1 )  ) ,
+        level = map_int( path,
+                         ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+            )
+    ) 
+
+# NB TODO: Give message for coordinates missing lat long
+```
+
+
+```{r}
+# 2017 data
+    data.2017 = data %>%
+        filter( orgUnit %in% clinics$id ) %>% 
+        mutate( year = substr( period , 1, 4 )  )  %>%
+        filter( year %in% 2017 ) %>%
+        group_by( year ,  orgUnit, dataElement ) %>%
+        summarise( value = sum( as.double(value) ) ) %>%
+        left_join( select( md$organisationUnits , id , name  , path) %>%
+                       mutate( level = map_int( path,
+                                                ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+                       ) ),
+                   by = c("orgUnit" = 'id' )
+                   ) %>%
+        ungroup %>%
+        rename( HF = name, id = dataElement ) %>%
+        left_join( select( md$dataElements, id, name ) ,
+                   by = c( 'id' ))  %>%
+        rename( dataElement = name ) %>%
+        select( year , level, HF, dataElement, value ) 
+    
+# numbers of HF submitting data (note, does not reflect number of months.  could be 1 or 12)
+    # count(data.2017, level, dataElement)
+```
+
+```{r, fig.width= 8, fig.height=10 }
+
+# select data.element to show by finding most frequent
+de_freq = data  %>%
+    mutate( year = substr( period, 1, 4 )) %>%
+    inner_join( select( md$dataElements, id, name  ) , 
+                by = c('dataElement'='id' )) %>%
+    count( year, name ) %>%
+    arrange( desc(year), desc(n) ) 
+
+de_most_freq = de_freq[1, ]
+
+
+d = left_join( clinics , 
+                  filter( data.2017, 
+                          dataElement %in% de_most_freq 
+                          # value > 0 
+                          ) %>%
+                      select( year, HF, value ),  
+                  by = c('name' = 'HF') 
+                              ) %>%
+                mutate( 
+                    value = ifelse( is.na( value ), 0 , value ) ,
+                    value.scale = ifelse( !is.na(value) & value>0 , 
+                                                    1 + log(1 + value/ mean(value, na.rm = TRUE) ) , 
+                                                 2 ) 
+                        ) %>%
+    filter( abs(long) <= 180 , abs(lat) <= 180 )
+
+ # NB: add test to see if coords within country; if not, try reversing
+
+
+    pal = colorNumeric('OrRd', data$value.scale )
+    binpal <- colorBin('OrRd', data$value , 5, pretty = TRUE)
+    factpal <- colorFactor( brewer_pal("qual", 2)(7),  data$level)
+
+ leaflet( d ) %>% 
+        addTiles( ) %>%
+        addCircleMarkers( 
+            ~long, ~lat, 
+            radius =  ~value.scale ,
+            weight =  ~value.scale ,
+            # label = ~paste( name , "(", value ,")" )  ,
+            labelOptions = labelOptions(noHide = T, textOnly = TRUE, textsize = "14px") ,
+            popup = ~paste( name , value ) , 
+            color = ~binpal(value)  , opacity = 1 ,
+            fillColor = ~factpal(level) , fillOpacity = 1
+        ) %>%
+        addScaleBar() %>%
+        addLegend(pal = factpal, values = ~level , opacity = 1 ) %>%
+        addLegend(pal = binpal, values = ~value, opacity = 1 ) 
+ 
+
+```
+
+
+## Submissions by data element / year
+
+Percentages shown in each chart are  
+1. Percentage of data elements with non-missing value   
+2. Percentage of OU that submitted 12/12 monthly reports
+
+
+```{r submisison_by_dataElement}
+
+ou_expected =  dataset %>% as.tibble %>%
+        separate( dataElement, c('dataSet', 'Category' ), 
+                  sep = '\\.' 
+                  ) %>%
+        filter( Category %in% 'EXPECTED_REPORTS', 
+                as.integer(value) == 1L
+                ) %>% 
+        # levels
+        left_join( ous %>% rename( orgUnit.name = name ), 
+                   by = c('orgUnit' = 'id')  ) %>%
+        # level names
+         left_join( 
+             select( md$organisationUnitLevels, level, name  ) %>%
+                 rename( level.name = name ), 
+             by = 'level' 
+             ) %>%
+    select( dataSet, Category, period, orgUnit, orgUnit.name , level.name )
+        
+# add expected reported to data, call new dataset 'submission'
+submission = data %>% as.tibble %>% 
+    mutate( year = substr( period, 1, 4 )) %>%
+    # dataset names
+    left_join(
+        mal.datasets.de  , 
+        by = c('dataElement' = 'dataElement.id' )
+        # NB: may have multiple datasets for one dataElement
+    ) %>% 
+    # link with facilities expected to report
+    inner_join( 
+        ou_expected , 
+        by = c( 'period'='period',  
+                'dataset.id' = 'dataSet', 
+                'orgUnit' = 'orgUnit') 
+        )
+
+submission_annual = submission %>% 
+    group_by( 
+        level.name, dataset.name, dataElement, dataElement.name, year, orgUnit 
+        ) %>%  
+    summarise( submission = sum( !is.na( value )) ) %>%
+    ungroup %>%
+    mutate(
+        dataset_dataElement = paste( dataset.name, dataElement.name,  sep = '_' )
+    )
+
+# NB: TODO FIx these summaries so they works for partial years
+
+submission_annual_rate = submission_annual %>%
+    group_by( dataset.name, dataElement.name, dataset_dataElement, year ) %>%
+    summarise( submission_rate = mean( submission / 12 ) ,
+               percent_12 =  sum(submission == 12) / n() ) %>%
+    ungroup()
+
+# submission_annual_rate %>% 
+#     select( dataElement.name, dataset.name, year, submission_rate ) %>%
+#     arrange( desc(year), desc(submission_rate) ) 
+
+most_submitted_dataset = submission_annual_rate$dataset.name[1]
+
+
+```
+
+<!-- The histograms below are for data elements associated with **`r most_submitted_dataset`**, the most frequently submitted dataset. -->
+
+```{r submission_histograms, fig.width=10, fig.height=8 }
+
+d =  count( submission_annual ,
+            # filter( submission_annual , 
+            #     dataset.name %in% most_submitted_dataset 
+            #     ) ,
+        dataset_dataElement , year, submission ) 
+
+ggplot( d ) +
+    geom_bar( aes( factor( submission ) , n), stat = 'identity' ) + 
+    geom_text( data = submission_annual_rate ,
+               # %>% 
+               #     filter( dataset.name %in% most_submitted_dataset )  , 
+               aes(label = paste(
+                       percent(submission_rate) , 
+                       percent( percent_12 ) ,
+                       sep = "\n" 
+                       )
+                   ) ,  x= 2, y= .8 * max( d$n, na.rm = TRUE ), 
+               hjust=0, size = 3 ) +
+    labs( x = "Number of submisisons per year", y = "Number of facilities" ,
+          title = 'Histogram of the number of monthly submissions per year' ,
+          subtitle = '(range 0-12 / yr)' ) +
+    facet_grid(  year ~ dataset_dataElement  ,
+                 labeller = label_wrap_gen(width = 20, multi_line = TRUE) )
+
+```
+
+<!-- TODO: Map submission rate for the previous year (12 months?) by district -->
+
+## Submission consistency
+
+Number of facilities reporting every month for the last 48 months, by dataset and data element. 
+
+```{r continuous_submisison}
+
+# function to determine which facilities reporting during previox xx intervals
+
+continuous = function( data = submission , intervals = 24 ){
+    
+    periods = unique( data$period )
+    periods = periods[ order(periods) ]
+    n_periods = length( periods )
+    
+    if (n_periods < intervals){
+        print( paste(
+            'There are only', n_periods, 'intervals; the function will test for contiunous submission for up to', n_periods, 'intervals.' 
+            ) )
+        
+        intervals = n_periods
+        
+    }
+    
+    interval_period = periods[ (n_periods-intervals + 1):n_periods ]
+    
+    s = data %>%
+        # de name
+        left_join(
+            select( md$dataElements , id, name ) ,
+            by = c('dataElement' = 'id' )
+            ) %>%
+        filter( 
+            period %in% interval_period
+                ) %>% 
+        group_by(
+            dataElement.name , dataset.name, orgUnit 
+            ) %>%
+        summarise( 
+            n = n()
+            ) %>%
+        mutate( 
+            all = factor( n == intervals ,
+                          levels = c( TRUE, FALSE ) ,
+                          labels = c("Clinics continuosly reporting" , 
+                    'Other clinics' )
+                    )
+        )
+        
+    
+    return(s)
+}
+
+ d = submission  %>% 
+    continuous( intervals = 24 ) %>%  
+    left_join(
+        select( ous , id, level ) , 
+        by = c('orgUnit' = 'id')
+    ) %>% 
+    group_by( level, dataElement.name , dataset.name ) %>%
+    summarise( all = sum( as.numeric(all)) )  %>%
+    spread( dataset.name, all ) 
+ 
+ kable( d, 'html' ) %>% 
+       kable_styling(bootstrap_options = c("striped", "hover"))%>%
+        column_spec(1, bold = T) 
+
+```
+
+```{r, eval = FALSE}
+
+map( c(12, 24, 36, 48), ~continuous( submission , intervals = .x) %>%
+         summarise( all = sum(all) ) ) %>% View
+
+```
+
+## Trends
+
+Compare trends among clinics reporting consistently for the last **24 months** with all the other clinics, many of which started reporting more recently. 
+
+Left column is the number of reported cases
+
+Right column is the number of facilities reporting per month
+
+
+```{r trend_plots, fig.width=10, fig.height=12 }
+
+# scale function
+scale_value <- function(x){
+  (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
+}
+
+trend = submission %>% 
+    unite( data.dataSet , dataElement.name, dataset.name, 
+           remove = FALSE ) %>%
+    # filter( 
+    #     # grepl( 'opd confirmed' , dataElement.name, ignore.case = TRUE ),
+    #     grepl( 'malaria' , dataset.name, ignore.case = TRUE )
+    #     ) %>% 
+    left_join( continuous( intervals = 24 )  ,
+               by = c( 'orgUnit', 'dataElement.name', 'dataset.name' )
+               ) %>%
+    group_by( data.dataSet, period, all ) %>%
+    summarise(
+        value = sum( as.integer( value ) ) , 
+        n = n() 
+    ) %>% 
+    group_by( data.dataSet, all ) %>%
+    mutate( 
+            value_rolling = rollmean( value  , 12, 
+                                       align = 'right', na.pad = TRUE) ,
+            value.scale = scale_value( value ) ,
+            value_rolling.scale = scale_value( value_rolling ) 
+        )     %>% 
+    ungroup
+
+trend$date = fast_strptime( as.character( trend$period ) , "%Y%m") 
+
+# dygraph
+# trend.xts = xts( trend %>% 
+#                      spread( data.dataSet, value )  %>% 
+#                      select( trend, -period ), 
+#                  order.by = trend$date )
+# dygraph( trend.xts )
+
+# ggplot
+trend.value =  ggplot( data = trend  ) +
+    geom_line( aes( x = date, y = value , 
+                    group = all, color = all )
+               ) +
+    theme(legend.position="bottom") +
+    labs( y = 'Cases', title = "Number malaria cases" , subtitle= "by dataElement_dataSet" ) +
+    facet_wrap( ~data.dataSet, scales = 'free' , ncol = 1, 
+                 labeller = label_wrap_gen(width = 50, multi_line = TRUE)
+                )
+
+trend.n =  ggplot( data = trend  ) +
+    geom_line( aes( x = date, y = n , 
+                    group = all, color = all )
+               ) +
+    theme(legend.position="bottom") +
+    labs( y = 'Number submissions', title = "Clinics submitting malaria cases" , subtitle= "by dataElement_dataSet" ) +
+    facet_wrap( ~data.dataSet, scales = 'free' , ncol = 1, 
+                 labeller = label_wrap_gen(width = 50, multi_line = TRUE)
+                )
+
+grid.arrange( trend.value , trend.n,  ncol=2)
+
+```
+
+
+## Signal to noise ratio 
+
+<!-- https://www.socialresearchmethods.net/kb/expclass.php -->
+
+<!-- http://www.stat.columbia.edu/~gelman/stuff_for_blog/chap20.pdf -->
+
+<!-- 'Observable effect size'  comparing annual cases by region and significant trends -->
+
+# Field visits
+
+- site selection options
