@@ -5,6 +5,19 @@ loginDHIS2<-function(baseurl,username,password) {
   r<-GET(url,authenticate(username,password))
   assert_that(r$status_code == 200L) }
   
+
+## gets json text from url and converts to data frame 
+get = function( source_url , ...){
+    
+    g = fromJSON( suppressMessages(
+        content( GET( source_url ), "text") ) 
+    )
+    
+    return( g )
+    
+}
+
+
  metadataDHIS2 = function(
   baseurl ,
   element, # e.g. data_elements, indicators, osu 
@@ -17,8 +30,7 @@ loginDHIS2<-function(baseurl,username,password) {
   if (element %in% 'all'){
     
     url<-paste0(baseurl,"api/metadata.json")
-    get_met = GET(url)
-    met = fromJSON(get_met) 
+    met = get( url ) 
     
     
     }
@@ -254,16 +266,6 @@ loginDHIS2<-function(baseurl,username,password) {
    ))
  }
  
- ## gets json text from url and converts to data frame 
- get = function( source_url , ...){
-     
-     g = fromJSON( suppressMessages(
-         content( GET( source_url ), "text") ) 
-     )
-     
-     return( g )
-     
- }
  
  # Retry function to use when querying database
  # borrowed from: https://stackoverflow.com/questions/20770497/how-to-retry-a-statement-on-error
