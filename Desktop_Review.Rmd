@@ -1008,26 +1008,26 @@ d = left_join( clinics ,
  # NB: add test to see if coords within country; if not, try reversing
 
 
-    pal = colorNumeric('OrRd', data$value.scale )
-    binpal <- colorBin('OrRd', data$value , 5, pretty = TRUE)
-    factpal <- colorFactor( brewer_pal("qual", 2)(7),  data$level)
+    pal = colorNumeric('OrRd', d$value.scale )
+    binpal <- colorBin('OrRd', d$value , 5, pretty = TRUE)
+    factpal <- colorFactor( brewer_pal("qual", 2)(7),  d$level)
 
  leaflet( d ) %>% 
         addTiles(  urlTemplate = 
                        "http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                    )  %>%
-        addCircleMarkers( 
+        addCircles( 
             ~long, ~lat, 
-            radius =  ~value.scale ,
+            radius =  500 ,
             weight =  ~value.scale ,
             # label = ~paste( name , "(", value ,")" )  ,
             labelOptions = labelOptions(noHide = T, textOnly = TRUE, textsize = "14px") ,
             popup = ~paste( name , value ) , 
             color = ~binpal(value)  , opacity = 1 ,
-            fillColor = ~factpal(level) , fillOpacity = 1
+            fillColor = ~binpal(value) , fillOpacity = .6
         ) %>%
         addScaleBar() %>%
-        addLegend(pal = factpal, values = ~level , opacity = 1 ) %>%
+        # addLegend(pal = factpal, values = ~level , opacity = 1 ) %>%
         addLegend(pal = binpal, values = ~value, opacity = 1 ) 
  
 
