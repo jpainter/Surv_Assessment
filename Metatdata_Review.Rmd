@@ -9,7 +9,7 @@ editor_options:
   chunk_output_type: console
 params:
   origin_login_file: Malawi
-  cache: TRUE
+  cache: FALSE
   echo: FALSE
 ---
 
@@ -115,9 +115,9 @@ knitr::opts_chunk$set( echo = params$echo ,
 
 
 
-# Metadata 
+# Metadata {.tabset .tabset-fade}
 
-
+## Metadata Structure
 ```{r all_meta }
 
   meta_data_file = paste0( folder , params$origin_login_file, 
@@ -171,6 +171,9 @@ Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `*
       scroll_box(height = "500px")
 
 ```
+
+
+# Organisational Units {.tabset .tabset-fade}
 
 ## Organizational Units and levels
 
@@ -330,6 +333,9 @@ NB  confirm whether all units assigned to group
 NB  confirm whether all units assigned to category
 
 
+
+# Data Elements {.tabset .tabset-fade}
+
 ## Data elements and categories
 
 NB: Focus on data elements for malaria, patients, ...
@@ -444,6 +450,8 @@ NB: Focus on data elements for malaria, patients, ...
 
 NB: more description of total vs details for each data element--need to list 
 
+
+# Datasets {.tabset .tabset-fade} 
 ## Datasets
 
 
@@ -569,7 +577,8 @@ Count the org units assigned to each form, which is the basis for the number of 
   
 ```
 
-# lets review that one more time...
+
+## dataElements 
 
 ```{r datatable_dataElements}
 
@@ -609,14 +618,29 @@ d = y %>%
                 ) %>%
     select( -categories ) %>%
     rename( category.name = name ) %>%
-    select( -categoryCombo, -dataElement, -dataSet )
+    select( -categoryCombo, -dataElement, -dataSet ) 
     
 # TODO: add in indice of %OU associated with each dataset
 # TODO: add in data Element Groups 
 
 # glimpse(d)
 
-datatable( d ) 
+# TODO: place this table on a separate tab?
+
+
+# NB: when datatable options changed, datatbale may not render until 'clear Knitr cache' selected 
+datatable( d, caption = "Data Elements", filter = 'top', editable = TRUE,
+           rownames = FALSE, selection = 'multiple' , 
+           extensions = c( 'Buttons', 'FixedHeader', 'Responsive') , 
+           options = list( 
+               dom = 't',
+               scrollX = TRUE,
+               fixedColumns = TRUE ,
+               dom = 'Bfrtip', 
+               buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+               pageLength = 50, fixedHeader = TRUE
+               )
+           ) 
 
 
 ```
