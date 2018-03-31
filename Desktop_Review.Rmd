@@ -7,10 +7,12 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  origin_login_file: training_sierra_leone
+  origin_login_file: Malawi
   cache: TRUE
   echo: FALSE
 ---
+
+<!-- NB:  when changing to country for review, MUST clear cache.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->
 
 # **Desktop Review: `r toupper( params$origin_login_file )`**
 
@@ -19,7 +21,7 @@ params:
 
 
 # list of required packages
-    package.list = c("rlist", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "tidyverse" )
+    package.list = c("rlist", "listviewer", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "tidyverse" )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -147,6 +149,10 @@ knitr::opts_chunk$set( echo = params$echo ,
 Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.    
 
 `r params$origin_login_file` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`), last updated `r md$system$date`.
+
+```{r list_viewer }
+ jsonedit( md )
+```
 
 ## Numbers of each attribute
 
@@ -923,7 +929,7 @@ Limitation: Because only one openiningDate is recorded, if clinic was closed, th
 
 <!-- Compare with indicators from other programs--tb, hiv, imm... -->
 
-## Locations of Org Units with number of confirmed malaria cases 
+## Map: Health facilities with number of confirmed malaria cases 
 
 
 ```{r}
@@ -1009,7 +1015,7 @@ d = left_join( clinics ,
 
 
     pal = colorNumeric('OrRd', d$value.scale )
-    binpal <- colorBin('OrRd', d$value , 5, pretty = TRUE)
+    binpal <- colorBin("plasma", d$value , 5, pretty = TRUE)
     factpal <- colorFactor( brewer_pal("qual", 2)(7),  d$level)
 
  leaflet( d ) %>% 
@@ -1020,9 +1026,9 @@ d = left_join( clinics ,
             ~long, ~lat, 
             radius =  500 ,
             weight =  ~value.scale ,
-            # label = ~paste( name , "(", value ,")" )  ,
-            labelOptions = labelOptions(noHide = T, textOnly = TRUE, textsize = "14px") ,
-            popup = ~paste( name , value ) , 
+            label = ~paste( name , "(level:", level, ")" , comma( value ) )   ,
+            labelOptions = labelOptions(noHide = FALSE, textOnly = TRUE, textsize = "14px") ,
+            popup = ~paste( name , "(level:", level, ")" , comma( value ) ) , 
             color = ~binpal(value)  , opacity = 1 ,
             fillColor = ~binpal(value) , fillOpacity = .6
         ) %>%
@@ -1220,8 +1226,7 @@ Left column is the number of reported cases
 
 Right column is the number of facilities reporting per month
 
-
-```{r trend_plots, fig.width=10, fig.height=12 }
+```{r}
 
 # scale function
 scale_value <- function(x){
@@ -1254,12 +1259,13 @@ trend = submission %>%
 
 trend$date = fast_strptime( as.character( trend$period ) , "%Y%m") 
 
-# dygraph
-# trend.xts = xts( trend %>% 
-#                      spread( data.dataSet, value )  %>% 
-#                      select( trend, -period ), 
-#                  order.by = trend$date )
-# dygraph( trend.xts )
+# number of variables...
+num_data.dataSet = length( unique( trend$data.dataSet ) ) 
+
+```
+
+
+```{r trend_plots, fig.width = 8 , fig.height = 1.5 * num_data.dataSet }
 
 # ggplot
 trend.value =  ggplot( data = trend  ) +
@@ -1282,7 +1288,7 @@ trend.n =  ggplot( data = trend  ) +
                  labeller = label_wrap_gen(width = 50, multi_line = TRUE)
                 )
 
-grid.arrange( trend.value , trend.n,  ncol=2)
+grid.arrange( trend.value , trend.n,  ncol=2 )
 
 ```
 
