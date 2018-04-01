@@ -15,7 +15,7 @@ params:
 
 <!-- NB:  when changing to country for review, MUST clear cache.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->
 
-# **Desktop Review: `r toupper( params$origin_login_file )`**
+# **`r toupper( params$origin_login_file )`**
 
 
 ```{r packages, echo = TRUE, cache=FALSE, warning=FALSE, include = FALSE }
@@ -450,6 +450,7 @@ NB: Focus on data elements for malaria, patients, ...
 
 NB: more description of total vs details for each data element--need to list 
 
+TODO: Are any data elements assigned to more than one dataset? 
 
 # Datasets {.tabset .tabset-fade} 
 ## Datasets
@@ -588,7 +589,8 @@ Count the org units assigned to each form, which is the basis for the number of 
 
 # then apply to all 
 y = map_df( 1:length(md$dataSets$dataSetElements), 
-            ~map_df( md$dataSets$dataSetElements[[.x]], ~as.matrix(.x) ))
+            ~map_df( md$dataSets$dataSetElements[[.x]], 
+                     ~as.matrix(.x) ))
 # glimpse(y)
 
 d = y %>% 
@@ -606,7 +608,7 @@ d = y %>%
                     select( name, id , categories ) , 
                 by = c('categoryCombo' = 'id' )
                 ) %>%
-    rename( categoryCombos.name = name ) %>%
+    rename( categoryCombos = name ) %>%
     mutate(
         # to keep all values, need to convert null to NA; 
         # otherwise unlist() drops the values
@@ -616,22 +618,47 @@ d = y %>%
                     select( name, id ) , 
                 by = c('categories' = 'id' )
                 ) %>%
-    select( -categories ) %>%
-    rename( category.name = name ) %>%
-    select( -categoryCombo, -dataElement, -dataSet ) 
+    select( -categories, -dataElement, -dataSet ) %>%
+    rename( category = name , 
+            dataElement = dataElement.name,
+            dataSet = dataSet.name ) %>%
+    mutate(
+        Malaria =  grepl( 'malaria' , dataElement , ignore.case = TRUE ) ,
+    Malaria.conf = Malaria & grepl( 'conf' , dataElement, ignore.case = TRUE) ,
+    Malaria.susp = Malaria & grepl( 'susp' , dataElement, ignore.case = TRUE) ,
+    patients = grepl( 'patient' , dataElement , ignore.case = TRUE ) ,
+    dataSet = factor( dataSet ), 
+    aggregationType = factor( aggregationType ) ,
+    valueType = factor( valueType ) ,
+    domainType = factor( domainType )
     
+    ) 
+    
+     
 # TODO: add in indice of %OU associated with each dataset
 # TODO: add in data Element Groups 
 
 # glimpse(d)
 
+```
+
+```{r display_dataElement_dataSets}
+
 # TODO: place this table on a separate tab?
 
 
 # NB: when datatable options changed, datatbale may not render until 'clear Knitr cache' selected 
-datatable( d, caption = "Data Elements", filter = 'top', editable = TRUE,
+datatable( d %>%
+    select( dataSet, dataElement, Malaria, patients, category, categoryCombos, 
+            zeroIsSignificant , aggregationType, valueType , domainType) ,
+    
+    caption = "Data Elements", filter = 'top', editable = TRUE,
            rownames = FALSE, selection = 'multiple' , 
-           extensions = c( 'Buttons', 'FixedHeader', 'Responsive') , 
+           extensions = c( 'Buttons', 
+                           'FixedHeader'
+                           # , 
+                           # 'Responsive'
+                           ) , 
            options = list( 
                dom = 't',
                scrollX = TRUE,
@@ -645,11 +672,11 @@ datatable( d, caption = "Data Elements", filter = 'top', editable = TRUE,
 
 ```
 
-...counts 
+## ...counts 
 
 ```{r}
 
-count( d, dataSet.name, category.name, categoryCombos.name, timelyDays, periodType )  %>% kable
+count( d, dataSet, category, categoryCombos, timelyDays, periodType )  %>% kable
 
 ```
 

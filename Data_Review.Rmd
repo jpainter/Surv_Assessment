@@ -1,0 +1,423 @@
+---
+title: "Desktop Data Review"
+
+output:
+  html_document:
+    css: custom.css
+    toc: true
+    toc_float: true
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+params:
+  origin_login_file: Malawi
+  data_directory: ../HMIS/DHIS2
+  cache: TRUE
+---
+
+## **`r params$origin_login_file`**
+<!-- load libraries... -->
+
+```{r packages, message=FALSE, include= FALSE }
+
+# list of required packages
+    package.list = c("rlist", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "tidyverse" )
+
+# Function to test if package is installed 
+    pkgTest <- function( package.list = package.list ){
+        
+        missing.packages = setdiff( package.list , rownames(installed.packages())) 
+        if ( length( missing.packages ) > 0 ) install.packages( missing.packages ) 
+    }
+
+
+# Test if packages loaded
+    pkgTest( package.list )
+
+# load the packages
+    lapply( package.list, suppressMessages( require ) , character.only = TRUE)
+
+
+knitr::opts_chunk$set( echo = params$echo ,
+                       fig.width =  8, 
+                       # knitr.table.format = "html" ,
+                       cache = params$cache # TRUE for testing; FALSE for production
+                       )
+
+```
+
+<!-- ...functions for fetching metadata -->
+
+```{r sources }
+
+source('dhis2_functions.R')
+
+    
+origin.folder = paste0( params$data_directory , "/" , params$origin_login_file , "/")
+
+
+ # login shortcuts
+
+login_origin = function(){
+    source( 
+    paste0( origin.folder, 
+            tolower( params$origin_login_file) , 
+            "_login" )
+    )
+
+  loginDHIS2( baseurl, username, password)
+}
+  
+```
+
+
+```{r all_meta }
+
+  meta_data_file = paste0( origin.folder , 
+                           params$origin_login_file, "_metadata.rds" ) 
+
+  if ( !file.exists( meta_data_file) ){
+   
+    # login in to server
+    login_origin()
+  
+    md = metadataDHIS2( baseurl, 'all' )
+    
+    # glimpse( md )
+    
+    write_rds( md, meta_data_file )
+    
+  } else {
+      
+       md = read_rds( meta_data_file )
+  }
+
+  # re-order alaphabetically to be easier to browse in View
+  md = md[order(names(md))]
+  
+  # Retrieve access data 
+  date_metadata = file.info( meta_data_file )$ctime 
+  
+```
+
+
+```{r date_strings }
+
+ # Function to create string of dates
+  date_code = function( years = 2013:2017 , months = 1:12 ){
+    period = character()
+    
+    for (year in years ){
+      for (month in seq_along(months)){
+        this_period = paste0( ";", 
+                         year , 
+                         ifelse( month < 10 , paste0("0", month) , month )
+        )
+        period =  c(period, this_period )
+      }
+    }
+    
+    # remove first ;
+    period =  paste( period, collapse = "")
+    period = substring( period, 2, nchar(period))
+    
+    return( period )
+  }
+ 
+  periods = date_code() # default: 2013-2017
+  # periods = date_code( 2017, 1 ) # January 2017 only
+  
+  # as character vector
+  periods.vector = strsplit( periods, ";" , fixed = TRUE )[[1]]
+
+  
+```
+
+
+```{r select_data_elements}
+    de = md$dataElements
+    
+    # Convert category combo from df to list (ends up with id as character)
+    de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
+    
+    # dataElement vars
+    # names( de )
+    display.vars = c('name', 'zeroIsSignificant', 'id', 'lastUpdated',
+                                 'categoryCombo' )
+    
+    mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
+    conf = grepl( 'conf' , de$name , ignore.case = TRUE )
+    susp = grepl( 'susp' , de$name , ignore.case = TRUE )
+    patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE )
+    attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
+
+    de.names = unique( de$name[ mal|attendance ] )
+
+```
+
+
+```{r levels}
+  # levels
+  levels = character()
+      for ( i in seq_along( md$organisationUnitLevels$id) ){
+    
+        levels =  c(levels, paste0("LEVEL-", i) )
+      }
+      
+      levels = paste( levels, collapse = ";")
+  
+  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+```
+
+
+```{r fetch_data_values_total }
+
+  data.file = paste0( origin.folder , 
+                     params$origin_login_file, 
+                     "_dataset.rds" )
+
+    if ( file.exists( data.file ) ){
+        
+          data_totals = readRDS( data.file ) 
+                                
+          
+    } else {
+  
+    # data elements:
+    de.ids = paste( md$dataElements[ md$dataElements$name %in% de.names, 'id' ], 
+                    collapse  = ";" )
+
+      # login in to server
+      retry( login_origin() )
+      
+      # import month by month
+      
+      data = list()
+      data.level = list()
+      for ( i in seq_along(periods.vector) ){
+    
+          print( paste( periods.vector[i] ) )
+        
+        for ( level in seq_along( levels.vector ) ){
+          
+          print( levels.vector[level] )
+      
+        #Assemble the URL ( before starting, double check semicolons for dx dimension )
+        url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                      "&dimension=ou:", levels.vector[level] , 
+                      "&dimension=pe:" , periods.vector[i] ,
+                      "&dimension=dx:" , 
+
+                      # malaria
+                      de.ids ,
+                      # opd summary
+                      # "KNrK5VWTZkx;NLKRV7bYbVy" , # population
+                      "&displayProperty=NAME")
+      
+        # Fetch data
+        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+        
+        # if returns a data frame of values (e.g. not 'server error'), then keep
+        if ( is.data.frame( fetch ) )  data.level[[level]] = fetch
+        
+        } 
+        
+    # combine level data
+    data[[i]] = data.table::rbindlist( data.level )
+    
+        print( paste( scales::comma( nrow( data[[i]] ) ) , "records"  ) )
+    
+    }
+  
+      # combine period data
+      data = data.table::rbindlist( data )
+      
+      print( paste( "TOTAL:", scales::comma( nrow( data ) ) , "records"  ) )
+    
+      # glimpse(data)
+      
+      # remove `created` `lastUpdated` as they refer to download dates and are not relevent
+      data_totals = data %>% select( -created, -lastUpdated )
+      
+      saveRDS( data_totals, data.file )
+}
+
+glimpse( data_totals ) 
+
+```
+
+```{r fetch_data_values_details }
+
+  data.file = paste0( origin.folder , 
+                     params$origin_login_file, 
+                     "_dataset_details.rds" )
+
+    if ( file.exists( data.file ) ){
+        
+          data_details = readRDS( data.file ) 
+                                
+          
+    } else {
+  
+    # data elements to get:
+    de.index =  md$dataElements$name %in% de.names
+    
+    # data.frame of dataElement-id and categorycomb0-id
+    de.catCombo = data_frame( dataElement = md$dataElements$id[ de.index ] ,
+                          dataElement.name = md$dataElements$name[ de.index ] ,
+                       categoryCombo = md$dataElements$categoryCombo$id[ de.index ] 
+    )
+    
+    # CategoryOptions for each categoryCombo
+    catOptCombos =  data_frame( categoryOptionCombo = md$categoryOptionCombos$id ,
+                        categoryCombo = md$categoryOptionCombos$categoryCombo$id
+    )
+    
+    de.catOptCombo = de.catCombo %>% inner_join( catOptCombos , by = "categoryCombo")
+    
+    # string to paste in to data request    
+    de.ids = paste( paste0( de.catOptCombo$dataElement, "." , 
+                            de.catOptCombo$categoryOptionCombo) ,
+                    collapse  = ";" )
+
+      # login in to server
+      retry( login_origin() )
+      
+    # import month by month
+      data = list()
+      data.level = list()
+      for ( i in seq_along(periods.vector) ){
+    
+          print( paste( periods.vector[i] ) )
+        
+        for ( level in seq_along( levels.vector ) ){
+          
+          print( levels.vector[level] )
+      
+        #Assemble the URL ( before starting, double check semicolons for dx dimension )
+        url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                      "&dimension=ou:", levels.vector[level] , 
+                      "&dimension=pe:" , periods.vector[i] ,
+                      "&dimension=dx:" , 
+
+                      # malaria
+                      de.ids ,
+                      # opd summary
+                      # "KNrK5VWTZkx;NLKRV7bYbVy" , # population
+                      "&displayProperty=NAME")
+      
+        # Fetch data
+        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+        
+        # if returns a data frame of values (e.g. not 'server error'), then keep
+        # remove `created` `lastUpdated` as they refer to download dates and are not relevent
+        if ( is.data.frame( fetch ) ){
+            data.level[[level]] = fetch %>% select( -created, -lastUpdated )  
+        }  
+      
+        
+        } 
+        
+    # combine level data
+    data[[i]] = data.table::rbindlist( data.level )
+    
+        print( paste( scales::comma( nrow( data[[i]] ) ) , "records"  ) )
+    
+    }
+  
+      # combine period data
+      data_details = data.table::rbindlist( data )
+      
+      print( paste( "TOTAL:", scales::comma( nrow( data_details ) ) , "records"  ) )
+    
+      # glimpse(data)
+      
+      saveRDS( data_details, data.file )
+}
+
+glimpse( data_details ) 
+
+```
+
+## Verify:  Sum of data-details equals data-totals
+
+The following table is sorted by difference, so that any differences between the sum of the details and the sum of the totals would be at the top of the table.
+
+```{r}
+
+    sum_details = data_details %>%
+        group_by( dataElement ) %>%
+        summarise(
+            sum_details = sum( as.integer( value ) , na.rm = TRUE ) 
+        )
+
+    sum_totals = data_totals %>%
+        group_by( dataElement ) %>%
+        summarise(
+            sum_totals = sum( as.integer( value ) , na.rm = TRUE ) 
+        )
+    
+    left_join( sum_details , sum_totals, by = 'dataElement' ) %>%
+        mutate( difference = sum_totals - sum_details ) %>%
+        arrange( -difference )
+
+    
+```
+
+
+## Data: data elements
+
+```{r count_dataElements_in_data, comment=""}
+
+  # List data elements by name
+  data_totals %>% left_join( select(md$dataElements, id, name) ,
+                      by = c("dataElement" = "id")
+                      ) %>%
+    select( -dataElement ) %>% rename( dataElement = name ) %>%
+    group_by( dataElement ) %>% 
+    summarise( 
+        Reported = n() ,
+        orgUnits = n_distinct( orgUnit ) ,
+        First =  as.yearmon( min( period ), "%Y%m") %>% format(., "%b-%Y"),
+        Last = as.yearmon( max( period ), "%Y%m") %>% format(., "%b-%Y")
+        ) %>% 
+    arrange( -Reported ) %>%
+    mutate( Reported = comma( Reported ), 
+            orgUnits = comma( orgUnits ) 
+            ) %>%
+    datatable( rownames = FALSE, options= list( pageLength = 15, scrollY = TRUE ) )
+```
+
+## Data: data sets
+
+```{r count_dataset_in_data, comment=""}
+
+  # data frame of datasets and data elements
+  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
+            ~map_df( md$dataSets$dataSetElements[[.x]], 
+                     ~as.matrix(.x) ))
+
+  # List data elements by name
+  data_totals %>% inner_join( dsde , by = "dataElement" 
+                      ) %>%
+    left_join( md$dataSets %>% select( id, name ), by = c("dataSet"="id")
+               ) %>%
+    select( -dataSet ) %>%
+    rename( dataSet = name ) %>% 
+    group_by( dataSet ) %>%
+    summarise( 
+        Reported =  n() ,
+        orgUnits = n_distinct( orgUnit )  ,
+        dataElements = n_distinct( dataElement ) ,
+        First =  as.yearmon( min( period ), "%Y%m") %>% format(., "%b-%Y"),
+        Last = as.yearmon( max( period ), "%Y%m") %>% format(., "%b-%Y")
+        ) %>% 
+    arrange( -Reported ) %>%
+    mutate( Reported = comma( Reported ), 
+            orgUnits = comma( orgUnits ) ,
+            dataElements = comma( dataElements )
+            ) %>%
+    datatable( rownames = FALSE, options= list( pageLength = 15 , scrollY = TRUE) )
+  
+```
+
