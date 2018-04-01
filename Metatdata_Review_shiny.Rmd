@@ -1,0 +1,256 @@
+---
+runtime: shiny 
+output:
+  html_document:
+    css: custom.css
+    toc: FALSE
+    toc_float: true
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+params:
+  origin_login_file: Malawi
+  cache: FALSE
+  echo: FALSE
+---
+
+<!-- NB:  when changing to country for review, MUST clear cache.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->
+
+# **`r toupper( params$origin_login_file )`**
+
+
+```{r packages, echo = TRUE, cache=FALSE, warning=FALSE, include = FALSE }
+
+
+# list of required packages
+    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "tidyverse" )
+
+# Function to test if package is installed 
+    pkgTest <- function( package.list = package.list ){
+        
+        missing.packages = setdiff( package.list , rownames(installed.packages())) 
+        if ( length( missing.packages ) > 0 ) install.packages( missing.packages ) 
+    }
+
+
+# Test if packages loaded
+    pkgTest( package.list )
+
+# load the packages
+    lapply( package.list, suppressMessages( require ) , character.only = TRUE)
+
+
+knitr::opts_chunk$set( echo = params$echo ,
+                       fig.width =  8, 
+                       # knitr.table.format = "html" ,
+                       cache = params$cache # TRUE for testing; FALSE for production
+                       )
+
+```
+
+
+```{r sources, cache = FALSE}
+
+  # functions for fetching metadata
+
+  source( 'dhis2_functions.R'  )
+  
+  # folder for storing review data
+
+  dhis2 = "../HMIS/DHIS2/"  # Location of base files
+  # dhis2 = ""  # Location of base files
+ 
+  folder = paste0( dhis2 ,  params$origin_login_file  , "/" )
+    
+  if ( !dir.exists( folder ) ){
+    dir.create( folder ) 
+  } 
+ 
+  
+  # login shortcut
+   login = function(){
+       source( paste0( folder, 
+                       tolower( params$origin_login_file ) , 
+                       "_login")  )
+       loginDHIS2( baseurl, username, password)
+   }
+ 
+
+```
+
+<!-- Define the year-month time periods for the review -->
+
+<!-- NB:  What about IDSR with weeks?  -->
+
+```{r date_strings }
+
+ # Function to create string of dates
+  date_code = function( years = 2013:2017 , months = 1:12 ){
+    period = character()
+    
+    for (year in years ){
+      for (month in seq_along(months)){
+        this_period = paste0( ";", 
+                         year , 
+                         ifelse( month < 10 , paste0("0", month) , month )
+        )
+        period =  c(period, this_period )
+      }
+    }
+    
+    # remove first ;
+    period =  paste( period, collapse = "")
+    period = substring( period, 2, nchar(period))
+    
+    return( period )
+  }
+ 
+  periods = date_code() # default: 2013-2017
+  # periods = date_code( 2017, 1 ) # January 2017 only
+  
+  # as character vector
+  periods.vector = strsplit( periods, ";" , fixed = TRUE )[[1]]
+
+  
+```
+
+
+
+# Metadata {.tabset .tabset-fade}
+
+## Metadata Structure
+```{r all_meta }
+
+  meta_data_file = paste0( folder , params$origin_login_file, 
+                           "_metadata.rds" ) 
+
+  if ( !file.exists( meta_data_file) ){
+   
+    # login in to server
+    login()
+  
+    md = metadataDHIS2( baseurl, 'all' )
+    
+    # glimpse( md )
+    
+    write_rds( md, meta_data_file )
+    
+  } else {
+      
+       md = read_rds( meta_data_file )
+  }
+
+  # re-order alaphabetically to be easier to browse in View
+  md = md[order(names(md))]
+  
+  # Retrieve access data 
+  date_metadata = file.info( meta_data_file )$ctime 
+  
+```
+
+Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.    
+
+`r params$origin_login_file` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`), last updated `r md$system$date`.
+
+## dataElements 
+
+```{r datatable_dataElements}
+
+# work out how to do extract elements from data.frame in a data.frame
+# x = map_df( md$dataSets$dataSetElements[[2]], ~as.matrix(.x) )
+# glimpse(x)
+
+# then apply to all 
+y = map_df( 1:length(md$dataSets$dataSetElements), 
+            ~map_df( md$dataSets$dataSetElements[[.x]], ~as.matrix(.x) ))
+# glimpse(y)
+
+d = y %>% 
+    # join data elements 
+    left_join( md$dataElements %>% select( name, id, domainType, aggregationType, valueType, zeroIsSignificant ) , 
+                by = c('dataElement' = 'id' )
+                ) %>%
+    rename( dataElement.name = name ) %>%
+    left_join( md$dataSets %>% 
+                    select( name, id, periodType, timelyDays  ) , 
+                by = c('dataSet' = 'id' )
+                ) %>%
+    rename( dataSet.name = name ) %>%
+    left_join( md$categoryCombos %>% 
+                    select( name, id , categories ) , 
+                by = c('categoryCombo' = 'id' )
+                ) %>%
+    rename( categoryCombos = name ) %>%
+    mutate(
+        # to keep all values, need to convert null to NA; 
+        # otherwise unlist() drops the values
+        categories = unlist( ifelse( is.null(categories), NA, categories ) )
+    ) %>%
+    left_join( md$categories %>% 
+                    select( name, id ) , 
+                by = c('categories' = 'id' )
+                ) %>%
+    select( -categories, -dataElement, -dataSet ) %>%
+    rename( category = name , 
+            dataElement = dataElement.name,
+            dataSet = dataSet.name ) %>%
+    mutate(
+        Malaria =  grepl( 'malaria' , dataElement , ignore.case = TRUE ) ,
+    Malaria.conf = Malaria & grepl( 'conf' , dataElement, ignore.case = TRUE) ,
+    Malaria.susp = Malaria & grepl( 'susp' , dataElement, ignore.case = TRUE) ,
+    patients = grepl( 'patient' , dataElement , ignore.case = TRUE ) ,
+    dataSet = factor( dataSet ), 
+    aggregationType = factor( aggregationType ) ,
+    valueType = factor( valueType ) ,
+    domainType = factor( domainType )
+    
+    ) 
+    
+     
+# TODO: add in indice of %OU associated with each dataset
+# TODO: add in data Element Groups 
+
+# glimpse(d)
+
+# TODO: place this table on a separate tab?
+
+
+# NB: when datatable options changed, datatbale may not render until 'clear Knitr cache' selected 
+dt = 
+datatable( d %>%
+    select( dataSet, dataElement, Malaria, patients, category, categoryCombos, 
+            zeroIsSignificant , aggregationType, valueType , domainType) ,
+    
+    caption = "Data Elements", 
+    filter = 'top', 
+           # editable = TRUE,
+           rownames = FALSE, selection = 'multiple' , 
+           extensions = c( 'Buttons', 
+                           # 'FixedHeader',
+                           'Select'
+                           # , 
+                           # 'Responsive'
+                           ) , 
+    options = list( 
+               scrollX = TRUE,
+               # fixedColumns = TRUE ,
+               dom = 'Bfrtip', 
+               buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+               pageLength = 50, fixedHeader = TRUE
+               )
+           ) 
+
+DT::renderDT({ dt })
+
+```
+
+## ...counts 
+
+```{r}
+
+count( d, dataSet, category, categoryCombos, timelyDays, periodType )  %>% kable
+
+```
+
+<!-- - Dataset ous by county.... -->
+
