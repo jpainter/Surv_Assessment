@@ -341,7 +341,7 @@ glimpse( data_details )
 
 ## Verify:  Sum of data-details equals data-totals
 
-The following table is sorted by difference, so that any differences between the sum of the details and the sum of the totals would be at the top of the table.
+The following table is sorted by difference, so that if there is any differences between the sum of the details and the sum of the totals, it would show up be the top of the table.
 
 ```{r}
 
@@ -420,4 +420,3 @@ The following table is sorted by difference, so that any differences between the
     datatable( rownames = FALSE, options= list( pageLength = 15 , scrollY = TRUE) )
   
 ```
-

@@ -676,9 +676,40 @@ datatable( d %>%
 
 ```{r}
 
-count( d, dataSet, category, categoryCombos, timelyDays, periodType )  %>% kable
+  count( d, dataSet, category, categoryCombos, timelyDays, periodType )  %>%
+    kable
 
 ```
 
 <!-- - Dataset ous by county.... -->
+
+## Are any dataElements in more than one dataset?
+
+```{r dE_in_more_than_one_dataset}
+  # data frame of datasets and data elements
+  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
+            ~map_df( md$dataSets$dataSetElements[[.x]], 
+                     ~as.matrix(.x) )) %>%
+    rename( dataElement.id = dataElement , 
+            dataSet.id = dataSet ) %>%
+    left_join( md$dataElements %>% select( id, name ) ,
+               by = c('dataElement.id' = 'id' )) %>%
+    rename( dataElement = name ) %>%
+    left_join( md$dataSets %>% select( id, name ) ,
+               by = c('dataSet.id' = 'id' )) %>%
+    rename( dataSet = name )
+
+  gt1datset = dsde %>% 
+      select( dataElement.id, dataElement, dataSet )  %>%
+      group_by( dataElement.id , dataElement ) %>%
+      summarise( 
+          n_dataSets = n_distinct( dataSet ) ,
+          dataSets = paste( dataSet, collapse = ";")
+          )  %>%
+      filter( n_dataSets > 1) %>%
+      arrange( n_dataSets, dataElement ) 
+  
+  kable( gt1datset )
+
+```
 
