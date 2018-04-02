@@ -8,7 +8,8 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  origin_login_file: Malawi
+  origin_login_file: training_sierra_leone
+  data_directory: ../HMIS/DHIS2
   cache: FALSE
   echo: FALSE
 ---
@@ -56,10 +57,11 @@ knitr::opts_chunk$set( echo = params$echo ,
   
   # folder for storing review data
 
-  dhis2 = "../HMIS/DHIS2/"  # Location of base files
-  # dhis2 = ""  # Location of base files
+  origin.folder = paste0( params$data_directory , "/" ,
+                          params$origin_login_file , "/")
+
  
-  folder = paste0( dhis2 ,  params$origin_login_file  , "/" )
+  folder = paste0( origin.folder ,  params$origin_login_file  , "/" )
     
   if ( !dir.exists( folder ) ){
     dir.create( folder ) 
@@ -120,7 +122,8 @@ knitr::opts_chunk$set( echo = params$echo ,
 ## Metadata Structure
 ```{r all_meta }
 
-  meta_data_file = paste0( folder , params$origin_login_file, 
+  meta_data_file = paste0( origin.folder , 
+                           params$origin_login_file, 
                            "_metadata.rds" ) 
 
   if ( !file.exists( meta_data_file) ){
@@ -336,12 +339,7 @@ NB  confirm whether all units assigned to category
 
 # Data Elements {.tabset .tabset-fade}
 
-## Data elements and categories
-
-NB: Focus on data elements for malaria, patients, ...
-
-
-```{r}
+```{r select_data_elements}
     de = md$dataElements
     
     # Convert category combo from df to list (ends up with id as character)
@@ -349,172 +347,244 @@ NB: Focus on data elements for malaria, patients, ...
     
     # dataElement vars
     # names( de )
-    display.vars = c('name', 'zeroIsSignificant', 'id', 'lastUpdated',
-                                 'categoryCombo' )
+    display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
+                                 'categoryCombo', 'id' )
     
-    mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
+   mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
+    TB = grepl( 'tb' , de$name , ignore.case = TRUE )
+    HIV = grepl( 'hiv' , de$name , ignore.case = TRUE )    
+    imm = grepl( 'imm' , de$name , ignore.case = TRUE )   
     conf = grepl( 'conf' , de$name , ignore.case = TRUE )
     susp = grepl( 'susp' , de$name , ignore.case = TRUE )
-    patients = grepl( 'patient' , de$name , ignore.case = TRUE )
+    opd = grepl( '\\<opd\\>' , de$name , ignore.case = TRUE )
+    ipd = grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )
+    patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE )
+    attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
+    pop = grepl( 'pop' , de$name , ignore.case = TRUE )
+    
+    search_words = c('malaria', 'TB', 'HIV' , 'imm', 'conf','susp', '\\<patient\\>', '\\<attendance\\>', 'opd', 'ipd' , 'pop')
+    
+    search_words = c('malaria', 'TB', 'HIV' , 'imm', 'conf','susp', '\\<patient\\>', '\\<attendance\\>', 'pop')
+    
+    search = 
+        map_df( search_words, ~data_frame(
+        search = .x ,
+        index =  list( grepl( .x , de$name , ignore.case = TRUE ) ) ,
+        count = sum(  grepl( .x , de$name , ignore.case = TRUE ) )
+    ))
+    
+    kable( search %>% select( search, count ), row.names = TRUE)
 
-# any malaria element
-    de.mal = de[ mal, display.vars ] %>%
-        rename( categoryCombo.id = categoryCombo ) %>%
-        mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+```
+
+```{r de.list}
+    de.list = function( filter ){   
+    
+        de. = de[ filter , display.vars ] %>%
+            rename( categoryCombo.id = categoryCombo ) %>%
+            mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+            
+            # categoryCombos
+            left_join(  
+                select( md$categoryCombos, id, name, categories ) %>%
+                            rename(categoryCombo.id = id,
+                                   categoryCombo = name ,
+                                   category.id = categories
+                            ) , 
+                        by = 'categoryCombo.id'
+                        ) %>%
         
-        # categoryCombos
-        left_join(  
-            select( md$categoryCombos, id, name, categories ) %>%
-                        rename(categoryCombo.id = id,
-                               categoryCombo = name ,
-                               category.id = categories
-                        ) , 
-                    by = 'categoryCombo.id'
+            # dataElementGroups
+            left_join( 
+                md$dataElementGroups %>% 
+                    select( name, dataElements) %>%
+                    rename( Group = name ) %>% 
+                    unnest ,
+                by = 'id'
+                )  
+            
+        
+        kable(
+            select( de. , 
+                    name, Group, zeroIsSignificant, lastUpdated, categoryCombo
                     ) %>%
+                rename( dataElement = name ) %>%
+                arrange( Group , dataElement), 
+               'html' ,
+            caption = paste("data elements with search term" ) ) %>%
+            kable_styling(bootstrap_options = c("striped", "hover")) 
+    }
     
-        # dataElementGroups
-        left_join( 
-            md$dataElementGroups %>% 
-                select( name, dataElements) %>%
-                rename( Group = name ) %>% 
-                unnest ,
-            by = 'id'
-            )    
-    
-    kable(
-        select( de.mal , 
-                name, Group, zeroIsSignificant, lastUpdated, categoryCombo
+```
+
+## Malaria
+
+```{r}
+    de.list( mal )
+```
+
+## TB
+
+```{r}
+    de.list( TB )
+```
+
+## HIV
+
+```{r}
+    de.list( HIV )
+```
+
+## Immunizations
+
+```{r}
+    de.list( imm )
+```
+
+## Patients
+
+```{r}
+    de.list( patients|attendance )
+```
+
+## Populations
+
+```{r}
+    de.list( pop )
+```
+
+# Datasets {.tabset .tabset-fade} 
+
+## All Datasets 
+
+
+```{r datatable_dataElements}
+
+  # data frame of datasets and data elements
+  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
+            ~map_df( md$dataSets$dataSetElements[[.x]], 
+                     ~as.matrix(.x) ))
+
+d = dsde %>% 
+    # join data elements 
+    left_join( md$dataElements %>% 
+                   select( name, id, domainType, aggregationType, valueType, zeroIsSignificant ) , 
+                by = c('dataElement' = 'id' )
                 ) %>%
-            rename( dataElement = name ) %>%
-            arrange( Group , dataElement), 
-           'html' ,
-        caption = "Confirmed malaria data elements" )  %>%
-        kable_styling(bootstrap_options = c("striped", "hover")) %>%
-        column_spec(1, bold = T)
-
+    rename( dataElement.name = name ) %>%
+    left_join( md$dataSets %>% 
+                    select( name, id, periodType, timelyDays  ) , 
+                by = c('dataSet' = 'id' )
+                ) %>%
+    rename( dataSet.name = name ) %>%
+    left_join( md$categoryCombos %>% 
+                    select( name, id , categories ) , 
+                by = c('categoryCombo' = 'id' )
+                ) %>%
+    rename( categoryCombos = name ) %>%
+    mutate(
+        # to keep all values, need to convert null to NA; 
+        # otherwise unlist() drops the null values
+        categories = map_chr( categories, 
+                              ~ifelse( is.null(.x), NA, unlist(.x) )
+                              )
+    ) %>%
+    left_join( md$categories %>% 
+                    select( name, id ) , 
+                by = c('categories' = 'id' )
+                ) %>%
+    select( -categories, -dataElement, -dataSet ) %>%
+    rename( category = name , 
+            dataElement = dataElement.name,
+            dataSet = dataSet.name ) %>%
+    mutate(
+        Malaria =  grepl( 'malaria' , dataElement , ignore.case = TRUE ) ,
+        Malaria.conf = Malaria & grepl( 'conf' , dataElement, ignore.case = TRUE) ,
+        Malaria.susp = Malaria & grepl( 'susp' , dataElement, ignore.case = TRUE) ,
+        patients = grepl( 'patient' , dataElement , ignore.case = TRUE ) ,
+        dataSet = factor( dataSet ), 
+        aggregationType = factor( aggregationType ) ,
+        valueType = factor( valueType ) ,
+        domainType = factor( domainType )
     
-# # confirmed malaria elements ####   
-#     mal.conf = de[ mal & conf, display.vars ] %>%
-#         rename( categoryCombo.id = categoryCombo ) %>%
-#         mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
-#         
-#         # categoryCombos
-#         left_join(  
-#             select( md$categoryCombos, id, name, categories ) %>%
-#                         rename(categoryCombo.id = id,
-#                                categoryCombo = name ,
-#                                category.id = categories
-#                         ) , 
-#                     by = 'categoryCombo.id'
-#                     ) %>%
-#     
-#         # dataElementGroups
-#         left_join( 
-#             md$dataElementGroups %>% 
-#                 select( name, dataElements) %>%
-#                 rename( Group = name ) %>% 
-#                 unnest ,
-#             by = 'id'
-#             )
-#     
-#     
-# 
-#     kable( select(mal.conf , name, Group, zeroIsSignificant, lastUpdated, categoryCombo ), 
-#            'html' ,
-#            caption = "Confirmed malaria data elements" )  %>%
-#         kable_styling(bootstrap_options = c("striped", "hover")) %>%
-#         column_spec(1, bold = T) 
-#     
+    ) 
+    
+     
+# TODO: add in indice of %OU associated with each dataset
+# TODO: add in data Element Groups 
 
- # # suspected malaria elements  ####       
- #    mal.susp = de[ mal & susp, display.vars ] %>%
- #        rename( categoryCombo.id = categoryCombo ) %>%
- #        mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
- #        left_join(  
- #            select( md$categoryCombos, id, name, categories ) %>%
- #                        rename(categoryCombo.id = id,
- #                               categoryCombo = name ,
- #                               category.id = categories
- #                        ) , 
- #                    by = 'categoryCombo.id'
- #                    ) 
- #    
- #    kable( select( mal.susp, name, zeroIsSignificant, lastUpdated, categoryCombo ), 
- #           'html' , 
- #           caption = 'Suspected malaria data elements' ) %>%
- #        kable_styling(bootstrap_options = c("striped", "hover")) %>%
- #        column_spec(1, bold = T) 
+# glimpse(d)
+
+```
+
+```{r}
+
+  count( d, dataSet, categoryCombos,  periodType, timelyDays  )  %>%
+    kable
 
 ```
 
 
-NB: more description of total vs details for each data element--need to list 
 
-TODO: Are any data elements assigned to more than one dataset? 
+## All dataElements within all dataSets
 
-# Datasets {.tabset .tabset-fade} 
-## Datasets
+
+```{r display_dataElement_dataSets}
+
+# TODO: place this table on a separate tab?
+
+
+# NB: when datatable options changed, datatbale may not render until 'clear Knitr cache' selected 
+datatable( d %>%
+    select( dataSet, dataElement, Malaria, patients, category, categoryCombos, 
+            zeroIsSignificant , aggregationType, valueType , domainType) ,
+    
+    caption = "Data Elements", 
+    filter = 'top', 
+    editable = TRUE,
+    rownames = FALSE, 
+    selection = 'multiple' , 
+    extensions = c( 'Buttons', 
+                           'FixedHeader'
+                           # , 
+                           # 'Responsive'
+                           ) , 
+           options = list( 
+               # dom = 't',
+               scrollX = TRUE,
+               scrollY = TRUE,
+               fixedColumns = TRUE ,
+               # dom = 'Bfrtip', 
+               # buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+               pageLength = 15, fixedHeader = TRUE
+               )
+           ) 
+
+
+```
+
+<!-- - Dataset ous by county.... -->
+
+## Reporting Malaria
 
 
 ```{r datasets }
 
-  # All dataElements and categoryCombos associated with each dataset
-  de = md$dataSets %>% 
-    select( id, name, periodType ) %>%
-    mutate( categoryCombo = map( md$dataSets$dataSetElements ,
-                                 'categoryCombo' ) ,
-            dataElement = map( md$dataSets$dataSetElements , 
-                               'dataElement' ) 
-            ) 
-
-   find_dataset_for_element = function( element ){
-       de %>%
-        mutate( 
-            a = map_lgl( dataElement, ~ any( element %in%  .x$id  ) )
-            ) %>%
-        filter( a ) %>% select( id )
-   } 
-   
-   # test
-   # find_dataset_for_element( mal.conf[1, 'id' ] )
-
-   
    # NB : There may be duplicate rows in de.mal because the same elements belong to multiple groups.
    # Compare with de.mal %>% select(-Group) %>% distinct()
    
-    
-   mal.datasets.de = de.mal %>% 
-       select( id, name ) %>%
-       distinct() %>%
-       rename(
-           dataElement.id = id ,
-           dataElement.name = name
-       ) %>% 
-       # data_frame( 
-       #     dataElement.id =  de.mal[, 'id' ] ,
-       #     dataElement.name =  de.mal[, 'name' ] 
-       #         ) %>%
-       mutate( 
-           dataset.id = map(
-               dataElement.id,  ~find_dataset_for_element( .x ) ) 
-           ) %>%
-       unnest %>%
-       left_join( select(md$dataSets, id, name, periodType ), 
-                  by = c('id' = 'id') ) %>%
-       rename( dataset.id = id , dataset.name = name ) %>%
-       arrange( dataElement.name, dataset.name)
-   
+
+  mald.dataset.ids = dsde %>% filter( dataElement %in% de[ mal , 'id' ] ) %>% .$dataSet
    
    # just list of malaria datasets
-   mal.datasets = mal.datasets.de %>%
-       group_by( dataset.id , periodType ) %>%
-       summarise( Name = unique( dataset.name ))%>%
-       rename( id = dataset.id, Frequency = periodType ) %>%
-       select( Name, id, Frequency) %>%
-       arrange( Name )
+   mal.datasets = md$dataSets %>%
+       select( id, name, periodType, timelyDays ) %>%
+       filter( id %in% mald.dataset.ids ) %>%
+       rename( Name = name ) %>%
+       arrange( Name ) %>%
+       select( Name, periodType, timelyDays, id)
    
-   
-   kable( mal.datasets.de, 'html' ) %>% 
+   kable( mal.datasets, 'html' ) %>% 
        kable_styling(bootstrap_options = c("striped", "hover"))%>%
         column_spec(1, bold = T) 
    
@@ -522,7 +592,7 @@ TODO: Are any data elements assigned to more than one dataset?
 
 ```
 
-
+## Assigned Organisation Units
  
 ```{r}
 
@@ -534,9 +604,6 @@ TODO: Are any data elements assigned to more than one dataset?
         num.ou = map_int( ou , ~length( flatten( .x[[1]] ) ) )
     ) %>%
     select( -ou )
-
-    
-    
 
 ```
  
@@ -579,111 +646,8 @@ Count the org units assigned to each form, which is the basis for the number of 
 ```
 
 
-## dataElements 
 
-```{r datatable_dataElements}
-
-# work out how to do extract elements from data.frame in a data.frame
-# x = map_df( md$dataSets$dataSetElements[[2]], ~as.matrix(.x) )
-# glimpse(x)
-
-# then apply to all 
-y = map_df( 1:length(md$dataSets$dataSetElements), 
-            ~map_df( md$dataSets$dataSetElements[[.x]], 
-                     ~as.matrix(.x) ))
-# glimpse(y)
-
-d = y %>% 
-    # join data elements 
-    left_join( md$dataElements %>% select( name, id, domainType, aggregationType, valueType, zeroIsSignificant ) , 
-                by = c('dataElement' = 'id' )
-                ) %>%
-    rename( dataElement.name = name ) %>%
-    left_join( md$dataSets %>% 
-                    select( name, id, periodType, timelyDays  ) , 
-                by = c('dataSet' = 'id' )
-                ) %>%
-    rename( dataSet.name = name ) %>%
-    left_join( md$categoryCombos %>% 
-                    select( name, id , categories ) , 
-                by = c('categoryCombo' = 'id' )
-                ) %>%
-    rename( categoryCombos = name ) %>%
-    mutate(
-        # to keep all values, need to convert null to NA; 
-        # otherwise unlist() drops the values
-        categories = unlist( ifelse( is.null(categories), NA, categories ) )
-    ) %>%
-    left_join( md$categories %>% 
-                    select( name, id ) , 
-                by = c('categories' = 'id' )
-                ) %>%
-    select( -categories, -dataElement, -dataSet ) %>%
-    rename( category = name , 
-            dataElement = dataElement.name,
-            dataSet = dataSet.name ) %>%
-    mutate(
-        Malaria =  grepl( 'malaria' , dataElement , ignore.case = TRUE ) ,
-    Malaria.conf = Malaria & grepl( 'conf' , dataElement, ignore.case = TRUE) ,
-    Malaria.susp = Malaria & grepl( 'susp' , dataElement, ignore.case = TRUE) ,
-    patients = grepl( 'patient' , dataElement , ignore.case = TRUE ) ,
-    dataSet = factor( dataSet ), 
-    aggregationType = factor( aggregationType ) ,
-    valueType = factor( valueType ) ,
-    domainType = factor( domainType )
-    
-    ) 
-    
-     
-# TODO: add in indice of %OU associated with each dataset
-# TODO: add in data Element Groups 
-
-# glimpse(d)
-
-```
-
-```{r display_dataElement_dataSets}
-
-# TODO: place this table on a separate tab?
-
-
-# NB: when datatable options changed, datatbale may not render until 'clear Knitr cache' selected 
-datatable( d %>%
-    select( dataSet, dataElement, Malaria, patients, category, categoryCombos, 
-            zeroIsSignificant , aggregationType, valueType , domainType) ,
-    
-    caption = "Data Elements", filter = 'top', editable = TRUE,
-           rownames = FALSE, selection = 'multiple' , 
-           extensions = c( 'Buttons', 
-                           'FixedHeader'
-                           # , 
-                           # 'Responsive'
-                           ) , 
-           options = list( 
-               dom = 't',
-               scrollX = TRUE,
-               fixedColumns = TRUE ,
-               dom = 'Bfrtip', 
-               buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
-               pageLength = 50, fixedHeader = TRUE
-               )
-           ) 
-
-
-```
-
-## ...counts 
-
-```{r}
-
-  count( d, dataSet, category, categoryCombos, timelyDays, periodType )  %>%
-    kable
-
-```
-
-<!-- - Dataset ous by county.... -->
-
-## Are any dataElements in more than one dataset?
+## Are any dataElements in more than one dataSet?
 
 ```{r dE_in_more_than_one_dataset}
 
@@ -710,7 +674,7 @@ datatable( d %>%
       filter( n_dataSets > 1) %>%
       arrange( n_dataSets, dataElement ) 
   
-  kable( gt1datset )
+  datatable( gt1datset )
 
 ```
 

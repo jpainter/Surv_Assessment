@@ -10,7 +10,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  origin_login_file: Malawi
+  origin_login_file: training_sierra_leone
   data_directory: ../HMIS/DHIS2
   cache: TRUE
 ---
@@ -133,7 +133,6 @@ login_origin = function(){
   
 ```
 
-
 ```{r select_data_elements}
     de = md$dataElements
     
@@ -146,13 +145,21 @@ login_origin = function(){
                                  'categoryCombo' )
     
     mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
+    TB = grepl( 'tb' , de$name , ignore.case = TRUE )
+    HIV = grepl( 'hiv' , de$name , ignore.case = TRUE )    
+    imm = grepl( 'imm' , de$name , ignore.case = TRUE )   
     conf = grepl( 'conf' , de$name , ignore.case = TRUE )
     susp = grepl( 'susp' , de$name , ignore.case = TRUE )
-    patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE )
+    opd = grepl( '\\<opd\\>' , de$name , ignore.case = TRUE )
+    ipd = grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )
+    patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
+         !grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) 7
+         !grepl( '\\<tb\\>' , de$name , ignore.case = TRUE )
     attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
     pop = grepl( 'pop' , de$name , ignore.case = TRUE )
     
-    search_words = c('malaria','conf','susp','\\<patient\\>', '\\<attendance\\>', 'pop')
+    search_words = c('malaria', 'TB', 'HIV' , 'imm', 'conf','susp', '\\<patient\\>', '\\<attendance\\>', 'opd', 'ipd' , 'pop')
+    
     search = 
         map_df( search_words, ~data_frame(
         search = .x ,
@@ -162,16 +169,34 @@ login_origin = function(){
     
     kable( search %>% select( search, count ), row.names = TRUE)
 
+    # review names and select most appropriate
     de.names = unique( de$name[ search$index[[1]]| #malaria
-                                    search$index[[5]]| #attendance
-                                    search$index[[6]] ] ) #population
+                                    search$index[[10]]| #ipd
+                                    search$index[[8]]| #attendance
+                                    search$index[[11]] ] ) #population
+    
+    # split elements into group of 50
+    section.size = 10
+    de.names.sections = ceiling( length( de.names ) / section.size )
+    
+    de.name.part = list()
+    for ( section in 1:de.names.sections){
+                start = (section-1)*section.size + 1
+                if (section == 1 ) start = 1
+                stop = (section)*section.size 
+                if (stop > length(de.names) ) stop = length(de.names)
+                
+                de.name.part[[section]] = de.names[ start:stop ] 
+        }
 
 ```
 
+```{r ou_levels}
 
-```{r levels}
+    md$organisationUnitLevels %>% select( id, name , level) %>% arrange( level )
+
   # levels
-  levels = character()
+      levels = character()
       for ( i in seq_along( md$organisationUnitLevels$id) ){
     
         levels =  c(levels, paste0("LEVEL-", i) )
@@ -179,16 +204,18 @@ login_origin = function(){
       
       levels = paste( levels, collapse = ";")
   
+  # import month by month
   levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+  
 ```
 
-## Values 
+## Values_total 
 
-```{r fetch_data_values_total }
+```{r fetch_data_values_total , eval= FALSE }
 
   data.file = paste0( origin.folder , 
                      params$origin_login_file, 
-                     "_dataset.rds" )
+                     "_dataset_details.rds" )
 
     if ( file.exists( data.file ) ){
         
@@ -197,17 +224,16 @@ login_origin = function(){
           
     } else {
   
-    # data elements:
-    de.ids = paste( md$dataElements[ md$dataElements$name %in% de.names, 'id' ], 
-                    collapse  = ";" )
-
       # login in to server
       retry( login_origin() )
       
       # import month by month
       
+      # initialize lists
       data = list()
       data.level = list()
+      data.de = list()
+      
       for ( i in seq_along(periods.vector) ){
     
           print( paste( periods.vector[i] ) )
@@ -215,9 +241,19 @@ login_origin = function(){
         for ( level in seq_along( levels.vector ) ){
           
           print( levels.vector[level] )
+            
+            for ( de.section in 1:de.names.sections ){
+                
+                # data elements:
+                de.ids = paste( 
+                    md$dataElements$id[ md$dataElements$name %in% de.name.part[de.section][[1]] ],
+                    collapse  = ";" )
+
+                
+                print( paste( 'part', de.section ) )
       
-        #Assemble the URL ( before starting, double check semicolons for dx dimension )
-        url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                #Assemble the URL ( before starting, double check semicolons for dx dimension )
+                url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
                       "&dimension=ou:", levels.vector[level] , 
                       "&dimension=pe:" , periods.vector[i] ,
                       "&dimension=dx:" , 
@@ -228,23 +264,29 @@ login_origin = function(){
                       # "KNrK5VWTZkx;NLKRV7bYbVy" , # population
                       "&displayProperty=NAME")
       
-        # Fetch data
-        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
-        
-        # if returns a data frame of values (e.g. not 'server error'), then keep
-        if ( is.data.frame( fetch ) )  data.level[[level]] = fetch
-        
-        } 
+                # Fetch data
+                fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+                
+                # if returns a data frame of values (e.g. not 'server error'), then keep
+                if ( is.data.frame( fetch ) ){ 
+                    data.de[[de.section]] = fetch
+                } else {
+                    data.de[[de.section]] = data_frame( NA )
+                }
+            }
+            
+            data.level[[level]] = data.table::rbindlist( data.de, fill = TRUE )
+        }
         
     # combine level data
-    data[[i]] = data.table::rbindlist( data.level )
+    data[[i]] = data.table::rbindlist( data.level , fill = TRUE )
     
         print( paste( scales::comma( nrow( data[[i]] ) ) , "records"  ) )
     
     }
   
       # combine period data
-      data = data.table::rbindlist( data )
+      data = data.table::rbindlist( data , fill = TRUE)
       
       print( paste( "TOTAL:", scales::comma( nrow( data ) ) , "records"  ) )
     
@@ -254,11 +296,14 @@ login_origin = function(){
       data_totals = data %>% select( -created, -lastUpdated )
       
       saveRDS( data_totals, data.file )
+      saveRDS( fetch$lastUpdated[1] , paste0(data.file, "_date") )
 }
 
 glimpse( data_totals ) 
 
 ```
+
+## Values_details
 
 ```{r fetch_data_values_details }
 
@@ -272,34 +317,17 @@ glimpse( data_totals )
                                 
           
     } else {
-  
-    # data elements to get:
-    de.index =  md$dataElements$name %in% de.names
-    
-    # data.frame of dataElement-id and categorycomb0-id
-    de.catCombo = data_frame( dataElement = md$dataElements$id[ de.index ] ,
-                          dataElement.name = md$dataElements$name[ de.index ] ,
-                       categoryCombo = md$dataElements$categoryCombo$id[ de.index ] 
-    )
-    
-    # CategoryOptions for each categoryCombo
-    catOptCombos =  data_frame( categoryOptionCombo = md$categoryOptionCombos$id ,
-                        categoryCombo = md$categoryOptionCombos$categoryCombo$id
-    )
-    
-    de.catOptCombo = de.catCombo %>% inner_join( catOptCombos , by = "categoryCombo")
-    
-    # string to paste in to data request    
-    de.ids = paste( paste0( de.catOptCombo$dataElement, "." , 
-                            de.catOptCombo$categoryOptionCombo) ,
-                    collapse  = ";" )
 
       # login in to server
       retry( login_origin() )
       
-    # import month by month
+      
+      # initialise lists
       data = list()
       data.level = list()
+      data.de = list()
+      
+    # import month by month , level, and data element
       for ( i in seq_along(periods.vector) ){
     
           print( paste( periods.vector[i] ) )
@@ -307,6 +335,36 @@ glimpse( data_totals )
         for ( level in seq_along( levels.vector ) ){
           
           print( levels.vector[level] )
+            
+            for ( de.section in 1:de.names.sections ){
+                
+              # data elements to get:
+                de.index =  md$dataElements$name %in% de.name.part[de.section][[1]] 
+    
+                # data.frame of dataElement-id and categorycomb0-id
+                de.catCombo = data_frame( 
+                    dataElement = md$dataElements$id[ de.index ] ,
+                    dataElement.name = md$dataElements$name[ de.index ] ,
+                    categoryCombo = md$dataElements$categoryCombo$id[ de.index ] 
+    )
+    
+                # CategoryOptions for each categoryCombo
+                catOptCombos =  data_frame( 
+                    categoryOptionCombo = md$categoryOptionCombos$id ,
+                    categoryCombo = md$categoryOptionCombos$categoryCombo$id
+                )
+                
+                de.catOptCombo = de.catCombo %>% 
+                    inner_join( catOptCombos , by = "categoryCombo")
+                
+                # string to paste in to data request    
+                de.ids = paste( paste0( de.catOptCombo$dataElement, "." , 
+                                        de.catOptCombo$categoryOptionCombo) ,
+                                collapse  = ";" )
+
+                print( paste( 'part', de.section , "/" , de.names.sections) )
+                
+                
       
         #Assemble the URL ( before starting, double check semicolons for dx dimension )
         url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
@@ -320,18 +378,20 @@ glimpse( data_totals )
                       # "KNrK5VWTZkx;NLKRV7bYbVy" , # population
                       "&displayProperty=NAME")
       
-        # Fetch data
-        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
-        
-        # if returns a data frame of values (e.g. not 'server error'), then keep
-        # remove `created` `lastUpdated` as they refer to download dates and are not relevent
-        if ( is.data.frame( fetch ) ){
-            data.level[[level]] = fetch %>% select( -created, -lastUpdated )  
-        }  
-      
-        
-        } 
-        
+                # Fetch data
+                fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+                
+                # if returns a data frame of values (e.g. not 'server error'), then keep
+                if ( is.data.frame( fetch ) ){ 
+                    data.de[[de.section]] = fetch
+                } else {
+                    data.de[[de.section]] = data_frame( NA )
+                }
+            }
+            
+            data.level[[level]] = data.table::rbindlist( data.de, fill = TRUE )
+        }
+          
     # combine level data
     data[[i]] = data.table::rbindlist( data.level )
     
@@ -347,105 +407,10 @@ glimpse( data_totals )
       # glimpse(data)
       
       saveRDS( data_details, data.file )
+      saveRDS( fetch$lastUpdated[1] , paste0(data.file, "_date") )
 }
 
 glimpse( data_details ) 
-
-```
-
-```{r fetch_data_values_details_populations }
-
-  # population variables
-  de.names = unique( de$name[ search$index[[6]] ] )
-
-  data.file = paste0( origin.folder , 
-                     params$origin_login_file, 
-                     "_dataset_details_populations.rds" )
-
-    if ( file.exists( data.file ) ){
-        
-          data_details = readRDS( data.file ) 
-                                
-          
-    } else {
-  
-    # data elements to get:
-    de.index =  md$dataElements$name %in% de.names
-    
-    # data.frame of dataElement-id and categorycomb0-id
-    de.catCombo = data_frame( dataElement = md$dataElements$id[ de.index ] ,
-                          dataElement.name = md$dataElements$name[ de.index ] ,
-                       categoryCombo = md$dataElements$categoryCombo$id[ de.index ] 
-    )
-    
-    # CategoryOptions for each categoryCombo
-    catOptCombos =  data_frame( categoryOptionCombo = md$categoryOptionCombos$id ,
-                        categoryCombo = md$categoryOptionCombos$categoryCombo$id
-    )
-    
-    de.catOptCombo = de.catCombo %>% inner_join( catOptCombos , by = "categoryCombo")
-    
-    # string to paste in to data request    
-    de.ids = paste( paste0( de.catOptCombo$dataElement, "." , 
-                            de.catOptCombo$categoryOptionCombo) ,
-                    collapse  = ";" )
-
-      # login in to server
-      retry( login_origin() )
-      
-    # import month by month
-      data = list()
-      data.level = list()
-      for ( i in seq_along(periods.vector) ){
-    
-          print( paste( periods.vector[i] ) )
-        
-        for ( level in seq_along( levels.vector ) ){
-          
-          print( levels.vector[level] )
-      
-        #Assemble the URL ( before starting, double check semicolons for dx dimension )
-        url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
-                      "&dimension=ou:", levels.vector[level] , 
-                      "&dimension=pe:" , periods.vector[i] ,
-                      "&dimension=dx:" , 
-
-                      # malaria
-                      de.ids ,
-                      # opd summary
-                      # "KNrK5VWTZkx;NLKRV7bYbVy" , # population
-                      "&displayProperty=NAME")
-      
-        # Fetch data
-        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
-        
-        # if returns a data frame of values (e.g. not 'server error'), then keep
-        # remove `created` `lastUpdated` as they refer to download dates and are not relevent
-        if ( is.data.frame( fetch ) ){
-            data.level[[level]] = fetch %>% select( -created, -lastUpdated )  
-        }  
-      
-        
-        } 
-        
-    # combine level data
-    data[[i]] = data.table::rbindlist( data.level )
-    
-        print( paste( scales::comma( nrow( data[[i]] ) ) , "records"  ) )
-    
-    }
-  
-      # combine period data
-      data_details_populations = data.table::rbindlist( data )
-      
-      print( paste( "TOTAL:", scales::comma( nrow( data_details ) ) , "records"  ) )
-    
-      # glimpse(data)
-      
-      saveRDS( data_details_populations, data.file )
-}
-
-glimpse( data_details_populations ) 
 
 ```
 
