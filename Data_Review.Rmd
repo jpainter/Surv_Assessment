@@ -15,7 +15,7 @@ params:
   cache: TRUE
 ---
 
-## **`r params$origin_login_file`**
+# **`r params$origin_login_file`** {.tabset .tabset-fade}
 <!-- load libraries... -->
 
 ```{r packages, message=FALSE, include= FALSE }
@@ -150,8 +150,21 @@ login_origin = function(){
     susp = grepl( 'susp' , de$name , ignore.case = TRUE )
     patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE )
     attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
+    pop = grepl( 'pop' , de$name , ignore.case = TRUE )
+    
+    search_words = c('malaria','conf','susp','\\<patient\\>', '\\<attendance\\>', 'pop')
+    search = 
+        map_df( search_words, ~data_frame(
+        search = .x ,
+        index =  list( grepl( .x , de$name , ignore.case = TRUE ) ) ,
+        count = sum(  grepl( .x , de$name , ignore.case = TRUE ) )
+    ))
+    
+    kable( search %>% select( search, count ), row.names = TRUE)
 
-    de.names = unique( de$name[ mal|attendance ] )
+    de.names = unique( de$name[ search$index[[1]]| #malaria
+                                    search$index[[5]]| #attendance
+                                    search$index[[6]] ] ) #population
 
 ```
 
@@ -169,6 +182,7 @@ login_origin = function(){
   levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
 ```
 
+## Values 
 
 ```{r fetch_data_values_total }
 
@@ -339,6 +353,102 @@ glimpse( data_details )
 
 ```
 
+```{r fetch_data_values_details_populations }
+
+  # population variables
+  de.names = unique( de$name[ search$index[[6]] ] )
+
+  data.file = paste0( origin.folder , 
+                     params$origin_login_file, 
+                     "_dataset_details_populations.rds" )
+
+    if ( file.exists( data.file ) ){
+        
+          data_details = readRDS( data.file ) 
+                                
+          
+    } else {
+  
+    # data elements to get:
+    de.index =  md$dataElements$name %in% de.names
+    
+    # data.frame of dataElement-id and categorycomb0-id
+    de.catCombo = data_frame( dataElement = md$dataElements$id[ de.index ] ,
+                          dataElement.name = md$dataElements$name[ de.index ] ,
+                       categoryCombo = md$dataElements$categoryCombo$id[ de.index ] 
+    )
+    
+    # CategoryOptions for each categoryCombo
+    catOptCombos =  data_frame( categoryOptionCombo = md$categoryOptionCombos$id ,
+                        categoryCombo = md$categoryOptionCombos$categoryCombo$id
+    )
+    
+    de.catOptCombo = de.catCombo %>% inner_join( catOptCombos , by = "categoryCombo")
+    
+    # string to paste in to data request    
+    de.ids = paste( paste0( de.catOptCombo$dataElement, "." , 
+                            de.catOptCombo$categoryOptionCombo) ,
+                    collapse  = ";" )
+
+      # login in to server
+      retry( login_origin() )
+      
+    # import month by month
+      data = list()
+      data.level = list()
+      for ( i in seq_along(periods.vector) ){
+    
+          print( paste( periods.vector[i] ) )
+        
+        for ( level in seq_along( levels.vector ) ){
+          
+          print( levels.vector[level] )
+      
+        #Assemble the URL ( before starting, double check semicolons for dx dimension )
+        url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                      "&dimension=ou:", levels.vector[level] , 
+                      "&dimension=pe:" , periods.vector[i] ,
+                      "&dimension=dx:" , 
+
+                      # malaria
+                      de.ids ,
+                      # opd summary
+                      # "KNrK5VWTZkx;NLKRV7bYbVy" , # population
+                      "&displayProperty=NAME")
+      
+        # Fetch data
+        fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+        
+        # if returns a data frame of values (e.g. not 'server error'), then keep
+        # remove `created` `lastUpdated` as they refer to download dates and are not relevent
+        if ( is.data.frame( fetch ) ){
+            data.level[[level]] = fetch %>% select( -created, -lastUpdated )  
+        }  
+      
+        
+        } 
+        
+    # combine level data
+    data[[i]] = data.table::rbindlist( data.level )
+    
+        print( paste( scales::comma( nrow( data[[i]] ) ) , "records"  ) )
+    
+    }
+  
+      # combine period data
+      data_details_populations = data.table::rbindlist( data )
+      
+      print( paste( "TOTAL:", scales::comma( nrow( data_details ) ) , "records"  ) )
+    
+      # glimpse(data)
+      
+      saveRDS( data_details_populations, data.file )
+}
+
+glimpse( data_details_populations ) 
+
+```
+
 ## Verify:  Sum of data-details equals data-totals
 
 The following table is sorted by difference, so that if there is any differences between the sum of the details and the sum of the totals, it would show up be the top of the table.
@@ -370,11 +480,15 @@ The following table is sorted by difference, so that if there is any differences
 ```{r count_dataElements_in_data, comment=""}
 
   # List data elements by name
-  data_totals %>% left_join( select(md$dataElements, id, name) ,
+  data_totals %>% 
+    # names of data elements
+    left_join( select(md$dataElements, id, name) ,
                       by = c("dataElement" = "id")
                       ) %>%
-    select( -dataElement ) %>% rename( dataElement = name ) %>%
-    group_by( dataElement ) %>% 
+    select( -dataElement ) %>% 
+    rename( dataElement = name ) %>%
+    # summarise reports by dataElement
+    group_by( dataElement) %>% 
     summarise( 
         Reported = n() ,
         orgUnits = n_distinct( orgUnit ) ,
@@ -398,9 +512,13 @@ The following table is sorted by difference, so that if there is any differences
                      ~as.matrix(.x) ))
 
   # List data elements by name
-  data_totals %>% inner_join( dsde , by = "dataElement" 
+  data_totals %>% 
+     # link datasets
+    left_join( dsde , by = "dataElement" 
                       ) %>%
-    left_join( md$dataSets %>% select( id, name ), by = c("dataSet"="id")
+      
+    left_join( md$dataSets %>% select( id, name ), 
+               by = c("dataSet"="id")
                ) %>%
     select( -dataSet ) %>%
     rename( dataSet = name ) %>% 
@@ -420,3 +538,25 @@ The following table is sorted by difference, so that if there is any differences
     datatable( rownames = FALSE, options= list( pageLength = 15 , scrollY = TRUE) )
   
 ```
+
+## Which are most informative data elements?
+
+- Completeness
+
+- Continuity
+
+## Trends
+
+- Identify most important dataElements and dataSets (do this nationally, and by county)
+
+1. Find HF that have been continuously reporting; compare the trend with rest of the data   
+    a. sum case counts by month   
+    b. Use seasonal decomposition models to estimate trends   
+    
+2. Calculate mean case count by month across all clinics (assumes that clinic case counts are normally distributed)
+    
+3. Calculate incidence with available population data--if it is by health facility
+
+4. Calculate case rate per 1,000 patients attending each HF, then take mean of across all HF
+
+5. Impute missing values based on location, # patients

@@ -686,6 +686,7 @@ datatable( d %>%
 ## Are any dataElements in more than one dataset?
 
 ```{r dE_in_more_than_one_dataset}
+
   # data frame of datasets and data elements
   dsde = map_df( 1:length(md$dataSets$dataSetElements), 
             ~map_df( md$dataSets$dataSetElements[[.x]], 
@@ -704,7 +705,7 @@ datatable( d %>%
       group_by( dataElement.id , dataElement ) %>%
       summarise( 
           n_dataSets = n_distinct( dataSet ) ,
-          dataSets = paste( dataSet, collapse = ";")
+          dataSets = paste( dataSet, collapse = "; ")
           )  %>%
       filter( n_dataSets > 1) %>%
       arrange( n_dataSets, dataElement ) 
