@@ -1,0 +1,13 @@
+*.Rproj.user
+*.Rhistory
+*.RData
+*.Ruserdata
+*.rds
+*.RDS
+*.rda
+*.RDA
+*_cache
+*_files
+*.html
+*.Rproj
+.Rproj.user
