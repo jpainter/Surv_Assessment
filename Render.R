@@ -11,7 +11,7 @@ library(rmarkdown)
 
 # list of options to pass to the markdown documents
     params.list = list(
-        origin_login_file = "training_sierra_leone", # selects dhis2 instance
+        origin_login_file = "Malawi", # selects dhis2 instance
         data_directory = "../HMIS/DHIS2" ,  # directory for login and data files
         cache = FALSE
     )

@@ -10,7 +10,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  origin_login_file: training_sierra_leone
+  origin_login_file: Malawi
   data_directory: ../HMIS/DHIS2
   cache: FALSE
   echo: TRUE
@@ -22,7 +22,7 @@ params:
 ```{r packages, message=FALSE, include= FALSE }
 
 # list of required packages
-    package.list = c("rlist", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "broom" , "tidyverse" )
+    package.list = c( "openxlsx", "readxl" , "rlist", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "broom" , "tidyverse" )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -55,7 +55,6 @@ source('dhis2_functions.R')
 
     
 origin.folder = paste0( params$data_directory , "/" , params$origin_login_file , "/")
-
 
  # login shortcuts
 
@@ -134,6 +133,28 @@ login_origin = function(){
   
 ```
 
+
+```{r ou_levels}
+
+    md$organisationUnitLevels %>% 
+    select( id, name , level) %>% 
+    arrange( level ) %>%
+    kable
+
+  # levels
+      levels = character()
+      for ( i in seq_along( md$organisationUnitLevels$id) ){
+    
+        levels =  c(levels, paste0("LEVEL-", i) )
+      }
+      
+      levels = paste( levels, collapse = ";")
+  
+  # import month by month
+  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+  
+```
+
 ## Data elements 
 
 - There are `r comma( length( md$dataElements$id ) ) ` data elements, each with potential multiple option combinations (e.g. age groups)
@@ -182,54 +203,63 @@ login_origin = function(){
                                     search$index[[8]]| #attendance
                                     search$index[[11]] ] ) #population
     
-    # split elements into group of 50
-    section.size = 3
-    de.names.sections = ceiling( length( de.names ) / section.size )
+    de.names_review = data_frame( 
+        Include = rep( NA, length( de.names ) ) ,
+        dataElement = de.names )
     
+    # write file that will be used to review and select data elements 
+    # de.review.csv = paste0( params$data_directory , "/" ,
+    #                              params$origin_login_file , "/" ,
+    #                              params$origin_login_file , "_" , 
+    #                              "dataElements.csv" )
+    # 
+    # write_csv( de.names_review , de.review.csv )
+    
+    de.review.xlsx = paste0( params$data_directory , "/" ,
+                                 params$origin_login_file , "/" ,
+                                 params$origin_login_file , "_" , 
+                                 "dataElements.xlsx" )
+    
+    if ( !file.exists( de.review.xlsx ) ) openxlsx::write.xlsx( de.names_review , de.review.xlsx )
+    
+```
+
+
+```{r data_elements_include }
+
+    # de.include = read_csv( de.review.filename  )
+
+    de.include = readxl::read_xlsx( de.review.xlsx  ) %>% filter( !is.na(Include) )
+
+    # divide elements into smaller parts
+    
+    # split elements into group of 50 
+    section.size = 3
+    de.names.sections = ceiling( length( de.include$Include ) / section.size )
+
     de.name.part = list()
     for ( section in 1:de.names.sections){
-                start = (section-1)*section.size + 1
-                if (section == 1 ) start = 1
-                stop = (section)*section.size 
-                if (stop > length(de.names) ) stop = length(de.names)
-                
-                de.name.part[[section]] = de.names[ start:stop ] 
-        }
+        start = (section-1)*section.size + 1
+        if (section == 1 ) start = 1
+        stop = (section)*section.size 
+        if (stop > length(de.include$Include) ) stop = length(de.include$Include)
+        
+        de.name.part[[section]] = de.include$dataElement[ start:stop ] 
+    }
 
 ```
 
-```{r ou_levels}
+## DataElements : Totals 
 
-    md$organisationUnitLevels %>% 
-    select( id, name , level) %>% 
-    arrange( level ) %>%
-    kable
+```{r fetch_data_values_total }
 
-  # levels
-      levels = character()
-      for ( i in seq_along( md$organisationUnitLevels$id) ){
-    
-        levels =  c(levels, paste0("LEVEL-", i) )
-      }
-      
-      levels = paste( levels, collapse = ";")
-  
-  # import month by month
-  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
-  
-```
-
-## Values_total 
-
-```{r fetch_data_values_total , eval= FALSE }
-
-  data.file = paste0( origin.folder , 
+  data.totals.file = paste0( origin.folder , 
                      params$origin_login_file, 
-                     "_dataset_details.rds" )
+                     "_dataset_totals.rds" )
 
     if ( file.exists( data.file ) ){
         
-          data_totals = readRDS( data.file ) 
+          data_totals = readRDS( data.totals.file ) 
                                 
           
     } else {
@@ -260,7 +290,9 @@ login_origin = function(){
                     collapse  = ";" )
 
                 
-                print( paste( 'part', de.section ) )
+                print( paste( periods.vector[i], levels.vector[level] , 
+                              'part', de.section , "/" , de.names.sections) 
+                       )
       
                 #Assemble the URL ( before starting, double check semicolons for dx dimension )
                 url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
@@ -296,34 +328,33 @@ login_origin = function(){
     }
   
       # combine period data
-      data = data.table::rbindlist( data , fill = TRUE)
+      data_totals = data.table::rbindlist( data , fill = TRUE)
       
       print( paste( "TOTAL:", scales::comma( nrow( data ) ) , "records"  ) )
-    
-      # glimpse(data)
+     
+      # save data
+      saveRDS( data_totals, data.totals.file )
+    }
       
-      # remove `created` `lastUpdated` as they refer to download dates and are not relevent
-      data_totals = data %>% select( -created, -lastUpdated )
-      
-      saveRDS( data_totals, data.file )
-      saveRDS( fetch$lastUpdated[1] , paste0(data.file, "_date") )
-}
+    data_totals_date = file.info(data.totals.file)$mtime
 
-glimpse( data_totals ) 
+    glimpse( data_totals ) 
 
 ```
 
-## Values_details
+The totals data was downloaded on `r data_totals_date`
+
+## DataElements : Details
 
 ```{r fetch_data_values_details }
 
-  data.file = paste0( origin.folder , 
+  data.details.file = paste0( origin.folder , 
                      params$origin_login_file, 
                      "_dataset_details.rds" )
 
-    if ( file.exists( data.file ) ){
+    if ( file.exists( data.details.file ) ){
         
-          data_details = readRDS( data.file ) 
+          data_details = readRDS( data.details.file ) 
                                 
           
     } else {
@@ -338,7 +369,7 @@ glimpse( data_totals )
       data.de = list()
       
     # import month by month , level, and data element
-      for ( i in seq_along(periods.vector) ){
+      for ( i in seq_along( periods.vector) ){ 
     
           print( paste( periods.vector[i] ) )
         
@@ -372,7 +403,9 @@ glimpse( data_totals )
                                         de.catOptCombo$categoryOptionCombo) ,
                                 collapse  = ";" )
 
-                print( paste( 'part', de.section , "/" , de.names.sections) )
+                print( paste( periods.vector[i], levels.vector[level] , 
+                              'part', de.section , "/" , de.names.sections) 
+                       )
                 
                 
       
@@ -394,6 +427,7 @@ glimpse( data_totals )
                 # if returns a data frame of values (e.g. not 'server error'), then keep
                 if ( is.data.frame( fetch ) ){ 
                     data.de[[de.section]] = fetch
+                    
                 } else {
                     data.de[[ de.section ]] = data_frame( NA )
                 }
@@ -401,33 +435,59 @@ glimpse( data_totals )
             
             data.level[[level]] = data.table::rbindlist( data.de, fill = TRUE )
             
-            print( paste( scales::comma( nrow( data.level[[level]] ) ) , "records"  ) )
+            print( paste( scales::comma( nrow( data.level[[level]] ) ) , "level records"  ) )
         }
           
     # combine level data
     data[[i]] = data.table::rbindlist( data.level, fill = TRUE )
     
-        print( paste( scales::comma( nrow( data[[i]] ) ) , "records"  ) )
+        print( paste( scales::comma( nrow( data[[i]] ) ) , "period records"  ) )
     
     }
   
       # combine period data
       data_details = data.table::rbindlist( data , fill = TRUE)
       
-      print( paste( "TOTAL:", scales::comma( nrow( data_details ) ) , "records"  ) )
+      print( paste( "TOTAL:", scales::comma( nrow( data_details ) ) , "total records"  ) )
     
-      # glimpse(data)
-      
-      saveRDS( data_details, data.file )
-      saveRDS( max( data_details$lastUpdated, na.rm =  TRUE ) , paste0(data.file, "_date") )
+      # save data file           
+      saveRDS( data_details, data.details.file )
 }
-
+      
     glimpse( data_details ) 
     
-    data_date = readRDS(  paste0(data.file, "_date") )
+    data_details_date = file.info(data.details.file)$mtime
+    
 ```
 
-The data was downloaded on `r data_date`
+The detailed data was downloaded on `r data_details_date`
+
+## Verify:  Sum of data-details equals data-totals
+
+The following table is sorted by the difference between sums for each variable.
+
+```{r verify_details_total }
+
+    sum_details = data_details %>%
+        group_by( dataElement ) %>%
+        summarise(
+            sum_details = sum( as.numeric( value ) , na.rm = TRUE ) 
+        )
+
+    sum_totals = data_totals %>%
+        group_by( dataElement ) %>%
+        summarise(
+            sum_totals = sum( as.numeric( value ) , na.rm = TRUE ) 
+        )
+    
+    left_join( sum_details , sum_totals, by = 'dataElement' ) %>%
+        mutate( difference = abs( sum_totals - sum_details ) )  %>%
+        arrange( -difference ) 
+    
+
+    
+```
+
 
 Summarise data values by dataElement_categoryOptionCombo
 
@@ -443,9 +503,9 @@ Summarise data values by dataElement_categoryOptionCombo
 
     # spread data so that each column is a variable
     df = dd %>% 
-        select( orgUnit, period, element_combo, value ) %>%
+        # select( orgUnit, period,  element_combo, value ) %>%
         mutate( value = as.numeric( value )) %>%
-        spread(element_combo, value  ) %>%
+        spread( element_combo, value  ) %>%
         select( -orgUnit, -period )
     
     do.call( data.frame , 
@@ -463,32 +523,6 @@ Summarise data values by dataElement_categoryOptionCombo
         datatable( rownames = FALSE , options = list( pageLength = 15) )
 ```
 
-## Verify:  Sum of data-details equals data-totals
-
-The following table is sorted by difference, so that if there is any differences between the sum of the details and the sum of the totals, it would show up be the top of the table.
-
-(this is currently not run)
-
-```{r , eval= FALSE }
-
-    sum_details = data_details %>%
-        group_by( dataElement ) %>%
-        summarise(
-            sum_details = sum( as.integer( value ) , na.rm = TRUE ) 
-        )
-
-    sum_totals = data_totals %>%
-        group_by( dataElement ) %>%
-        summarise(
-            sum_totals = sum( as.integer( value ) , na.rm = TRUE ) 
-        )
-    
-    left_join( sum_details , sum_totals, by = 'dataElement' ) %>%
-        mutate( difference = sum_totals - sum_details ) %>%
-        arrange( -difference )
-
-    
-```
 
 
 ## Data: data elements
