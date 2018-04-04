@@ -12,7 +12,8 @@ editor_options:
 params:
   origin_login_file: training_sierra_leone
   data_directory: ../HMIS/DHIS2
-  cache: TRUE
+  cache: FALSE
+  echo: TRUE
 ---
 
 # **`r params$origin_login_file`** {.tabset .tabset-fade}
@@ -21,7 +22,7 @@ params:
 ```{r packages, message=FALSE, include= FALSE }
 
 # list of required packages
-    package.list = c("rlist", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "tidyverse" )
+    package.list = c("rlist", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "broom" , "tidyverse" )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -133,6 +134,12 @@ login_origin = function(){
   
 ```
 
+## Data elements 
+
+- There are `r comma( length( md$dataElements$id ) ) ` data elements, each with potential multiple option combinations (e.g. age groups)
+
+- Lets select some data elements using key word (or parital word) searches
+
 ```{r select_data_elements}
     de = md$dataElements
     
@@ -153,7 +160,7 @@ login_origin = function(){
     opd = grepl( '\\<opd\\>' , de$name , ignore.case = TRUE )
     ipd = grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )
     patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
-         !grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) 7
+         !grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) &
          !grepl( '\\<tb\\>' , de$name , ignore.case = TRUE )
     attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
     pop = grepl( 'pop' , de$name , ignore.case = TRUE )
@@ -162,12 +169,12 @@ login_origin = function(){
     
     search = 
         map_df( search_words, ~data_frame(
-        search = .x ,
+        search_string = .x ,
         index =  list( grepl( .x , de$name , ignore.case = TRUE ) ) ,
         count = sum(  grepl( .x , de$name , ignore.case = TRUE ) )
     ))
     
-    kable( search %>% select( search, count ), row.names = TRUE)
+    kable( search %>% select( search_string, count ), row.names = TRUE)
 
     # review names and select most appropriate
     de.names = unique( de$name[ search$index[[1]]| #malaria
@@ -176,7 +183,7 @@ login_origin = function(){
                                     search$index[[11]] ] ) #population
     
     # split elements into group of 50
-    section.size = 10
+    section.size = 3
     de.names.sections = ceiling( length( de.names ) / section.size )
     
     de.name.part = list()
@@ -193,7 +200,10 @@ login_origin = function(){
 
 ```{r ou_levels}
 
-    md$organisationUnitLevels %>% select( id, name , level) %>% arrange( level )
+    md$organisationUnitLevels %>% 
+    select( id, name , level) %>% 
+    arrange( level ) %>%
+    kable
 
   # levels
       levels = character()
@@ -385,40 +395,81 @@ glimpse( data_totals )
                 if ( is.data.frame( fetch ) ){ 
                     data.de[[de.section]] = fetch
                 } else {
-                    data.de[[de.section]] = data_frame( NA )
+                    data.de[[ de.section ]] = data_frame( NA )
                 }
             }
             
             data.level[[level]] = data.table::rbindlist( data.de, fill = TRUE )
+            
+            print( paste( scales::comma( nrow( data.level[[level]] ) ) , "records"  ) )
         }
           
     # combine level data
-    data[[i]] = data.table::rbindlist( data.level )
+    data[[i]] = data.table::rbindlist( data.level, fill = TRUE )
     
         print( paste( scales::comma( nrow( data[[i]] ) ) , "records"  ) )
     
     }
   
       # combine period data
-      data_details = data.table::rbindlist( data )
+      data_details = data.table::rbindlist( data , fill = TRUE)
       
       print( paste( "TOTAL:", scales::comma( nrow( data_details ) ) , "records"  ) )
     
       # glimpse(data)
       
       saveRDS( data_details, data.file )
-      saveRDS( fetch$lastUpdated[1] , paste0(data.file, "_date") )
+      saveRDS( max( data_details$lastUpdated, na.rm =  TRUE ) , paste0(data.file, "_date") )
 }
 
-glimpse( data_details ) 
+    glimpse( data_details ) 
+    
+    data_date = readRDS(  paste0(data.file, "_date") )
+```
 
+The data was downloaded on `r data_date`
+
+Summarise data values by dataElement_categoryOptionCombo
+
+```{r summarise_data_variables }
+   dd = data_details %>%
+        inner_join( md$dataElements %>% select( id , name ) ,
+                    by = c( 'dataElement' = 'id' ) ) %>%
+        rename( de.name = name )  %>%
+        inner_join( md$categoryOptionCombos %>% select( id , name ) ,
+                    by = c( 'categoryOptionCombo' = 'id' ) ) %>%
+        rename( cat.name = name )  %>%
+        unite( element_combo , de.name, cat.name )
+
+    # spread data so that each column is a variable
+    df = dd %>% 
+        select( orgUnit, period, element_combo, value ) %>%
+        mutate( value = as.numeric( value )) %>%
+        spread(element_combo, value  ) %>%
+        select( -orgUnit, -period )
+    
+    do.call( data.frame , 
+           list(
+               Element = names( df ) ,
+               mean = map_dbl(df, ~round( mean( .x , na.rm = TRUE ) ) ),
+                sd = map_dbl(df, ~round( sd( .x , na.rm = TRUE) ) ) ,
+                median = map_dbl(df, median, na.rm = TRUE) ,
+                min = map_dbl(df, min, na.rm = TRUE) ,
+                max = map_dbl(df, max, na.rm = TRUE) ,
+                n = map_dbl(df, length) ,
+                nmiss =  map_dbl(df, ~sum( is.na(.x) ) )
+           )) %>%
+        mutate_if( is.numeric , comma ) %>% 
+        datatable( rownames = FALSE , options = list( pageLength = 15) )
 ```
 
 ## Verify:  Sum of data-details equals data-totals
 
 The following table is sorted by difference, so that if there is any differences between the sum of the details and the sum of the totals, it would show up be the top of the table.
 
-```{r}
+(this is currently not run)
+
+```{r , eval= FALSE }
 
     sum_details = data_details %>%
         group_by( dataElement ) %>%
@@ -442,10 +493,12 @@ The following table is sorted by difference, so that if there is any differences
 
 ## Data: data elements
 
-```{r count_dataElements_in_data, comment=""}
+NB:  the counts include all of the option combos.  TODO:  recalculate
+
+```{r count_dataElements_in_data, comment="" }
 
   # List data elements by name
-  data_totals %>% 
+  data_details %>% 
     # names of data elements
     left_join( select(md$dataElements, id, name) ,
                       by = c("dataElement" = "id")
@@ -477,7 +530,7 @@ The following table is sorted by difference, so that if there is any differences
                      ~as.matrix(.x) ))
 
   # List data elements by name
-  data_totals %>% 
+  data_details %>% 
      # link datasets
     left_join( dsde , by = "dataElement" 
                       ) %>%
@@ -504,7 +557,7 @@ The following table is sorted by difference, so that if there is any differences
   
 ```
 
-## Which are most informative data elements?
+## Which are the most informative data elements?
 
 - Completeness
 

@@ -11,7 +11,7 @@ params:
   origin_login_file: training_sierra_leone
   data_directory: ../HMIS/DHIS2
   cache: FALSE
-  echo: FALSE
+  echo: TRUE
 ---
 
 <!-- NB:  when changing to country for review, MUST clear cache.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->

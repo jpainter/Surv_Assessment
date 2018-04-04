@@ -276,7 +276,8 @@ get = function( source_url , ...){
  retry <- function(expr, isError=function(x) "try-error" %in% class(x), 
                    maxErrors=5, sleep=0) {
      attempts = 0
-     retval = try(eval(expr))
+     retval = try( eval(expr) )
+     
      while (isError(retval)) {
          attempts = attempts + 1
          if (attempts >= maxErrors) {
