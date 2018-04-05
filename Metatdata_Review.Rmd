@@ -54,25 +54,29 @@ knitr::opts_chunk$set( echo = params$echo ,
   # functions for fetching metadata
 
   source( 'dhis2_functions.R'  )
+
+    data_directory = params$data_directory
+    origin_login_file = params$origin_login_file
   
   # folder for storing review data
 
-  origin.folder = paste0( params$data_directory , "/" ,
-                          params$origin_login_file , "/")
+  origin.folder = paste0( data_directory , "/" ,
+                          origin_login_file , "/")
 
  
-  folder = paste0( origin.folder ,  params$origin_login_file  , "/" )
-    
-  if ( !dir.exists( folder ) ){
-    dir.create( folder ) 
-  } 
+  # folder = paste0( origin.folder ,  params$origin_login_file  , "/" )
+  #   
+  # if ( !dir.exists( folder ) ){
+  #   dir.create( folder ) 
+  # } 
  
   
-  # login shortcut
-   login = function(){
-       source( paste0( folder, 
-                       tolower( params$origin_login_file ) , 
+  # origin.login shortcut
+   origin.login = function(){
+       source( paste0( origin.folder , 
+                       tolower( origin_login_file ) , 
                        "_login")  )
+       # print( baseurl )
        loginDHIS2( baseurl, username, password)
    }
  
@@ -123,17 +127,18 @@ knitr::opts_chunk$set( echo = params$echo ,
 ```{r all_meta }
 
   meta_data_file = paste0( origin.folder , 
-                           params$origin_login_file, 
+                           origin_login_file, 
                            "_metadata.rds" ) 
 
   if ( !file.exists( meta_data_file) ){
    
-    # login in to server
-    login()
+    # origin.login in to server
+    origin.login()
   
-    md = metadataDHIS2( baseurl, 'all' )
+    url <- paste0( baseurl, "api/metadata.json" )
+    md = get( url ) 
     
-    # glimpse( md )
+    # View( md )
     
     write_rds( md, meta_data_file )
     
@@ -143,7 +148,7 @@ knitr::opts_chunk$set( echo = params$echo ,
   }
 
   # re-order alaphabetically to be easier to browse in View
-  md = md[order(names(md))]
+  md = md[ order( names(md) ) ]
   
   # Retrieve access data 
   date_metadata = file.info( meta_data_file )$ctime 
@@ -339,6 +344,7 @@ NB  confirm whether all units assigned to category
 
 # Data Elements {.tabset .tabset-fade}
 
+String search for data elements.  Note that when \<*words*<\ are surrounded by '\<', the search is looking for the whole word (with leading and trailing space). 
 ```{r select_data_elements}
     de = md$dataElements
     
@@ -350,30 +356,30 @@ NB  confirm whether all units assigned to category
     display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
                                  'categoryCombo', 'id' )
     
-   mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
-    TB = grepl( 'tb' , de$name , ignore.case = TRUE )
-    HIV = grepl( 'hiv' , de$name , ignore.case = TRUE )    
-    imm = grepl( 'imm' , de$name , ignore.case = TRUE )   
-    conf = grepl( 'conf' , de$name , ignore.case = TRUE )
-    susp = grepl( 'susp' , de$name , ignore.case = TRUE )
-    opd = grepl( '\\<opd\\>' , de$name , ignore.case = TRUE )
-    ipd = grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )
-    patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE )
-    attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
-    pop = grepl( 'pop' , de$name , ignore.case = TRUE )
+    # mal = grepl( '\\<malaria\\>' , de$name , ignore.case = TRUE )
+    # TB = grepl( '\\<tb\\>' , de$name , ignore.case = TRUE )
+    # HIV = grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE )    
+    # imm = grepl( 'imm' , de$name , ignore.case = TRUE )   
+    # conf = grepl( 'conf' , de$name , ignore.case = TRUE )
+    # susp = grepl( 'susp' , de$name , ignore.case = TRUE )
+    # opd = grepl( '\\<opd\\>' , de$name , ignore.case = TRUE )
+    # ipd = grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )
+    # patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
+    #      !grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) &
+    #      !grepl( '\\<tb\\>' , de$name , ignore.case = TRUE )
+    # attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
+    # pop = grepl( 'pop' , de$name , ignore.case = TRUE )
     
-    search_words = c('malaria', 'TB', 'HIV' , 'imm', 'conf','susp', '\\<patient\\>', '\\<attendance\\>', 'opd', 'ipd' , 'pop')
-    
-    search_words = c('malaria', 'TB', 'HIV' , 'imm', 'conf','susp', '\\<patient\\>', '\\<attendance\\>', 'pop')
+    search_words = c('\\<malaria\\>', '\\<tb\\>', '\\<hiv\\>' , 'imm', 'conf', 'susp', '\\<patient\\>', '\\<attendance\\>', '\\<opd\\>', '\\<ipd\\>' , 'pop')
     
     search = 
         map_df( search_words, ~data_frame(
-        search = .x ,
+        search_string = .x ,
         index =  list( grepl( .x , de$name , ignore.case = TRUE ) ) ,
         count = sum(  grepl( .x , de$name , ignore.case = TRUE ) )
     ))
     
-    kable( search %>% select( search, count ), row.names = TRUE)
+    kable( search %>% select( search_string, count ), row.names = TRUE)
 
 ```
 
@@ -451,6 +457,39 @@ NB  confirm whether all units assigned to category
 
 ```{r}
     de.list( pop )
+```
+
+## Select variables...
+
+- There are `r comma( length( md$dataElements$id ) ) ` data elements, each with potential multiple option combinations (e.g. age groups)
+
+- Lets select some data elements using key word (or parital word) searches.  A spreadsheet will be created in the data directory listing data elements with 'malaria', 'ipd', 'attendance', and 'pop'.  
+
+- Open the spreadsheet:  when openned the column **Include** is blank.  Any character in the sheet will mark the variable for inclusion.
+
+- Save the sheet, then run the Data_Review.Rmd file to assess the data.  
+
+NB: Future versions should aspire to having a more elegant interface for selecting variables.
+
+```{r select_data_elements}
+    
+    # review names and select most appropriate
+    de.names = unique( de$name[ search$index[[1]]| #malaria
+                                    search$index[[10]]| #ipd
+                                    search$index[[8]]| #attendance
+                                    search$index[[11]] ] ) #population
+    
+    de.names_review = data_frame( 
+        Include = rep( NA, length( de.names ) ) ,
+        dataElement = de.names )
+    
+    de.review.xlsx = paste0( params$data_directory , "/" ,
+                                 params$origin_login_file , "/" ,
+                                 params$origin_login_file , "_" , 
+                                 "dataElements.xlsx" )
+    
+    if ( !file.exists( de.review.xlsx ) ) openxlsx::write.xlsx( de.names_review , de.review.xlsx )
+    
 ```
 
 # Datasets {.tabset .tabset-fade} 

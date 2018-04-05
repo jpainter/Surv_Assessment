@@ -10,7 +10,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  origin_login_file: Malawi
+  origin_login_file: Uganda
   data_directory: ../HMIS/DHIS2
   cache: FALSE
   echo: TRUE
@@ -55,6 +55,8 @@ source('dhis2_functions.R')
 
     
 origin.folder = paste0( params$data_directory , "/" , params$origin_login_file , "/")
+
+origin_login_file = params$origin_login_file
 
  # login shortcuts
 
@@ -157,73 +159,7 @@ login_origin = function(){
 
 ## Data elements 
 
-- There are `r comma( length( md$dataElements$id ) ) ` data elements, each with potential multiple option combinations (e.g. age groups)
-
-- Lets select some data elements using key word (or parital word) searches
-
-```{r select_data_elements}
-    de = md$dataElements
-    
-    # Convert category combo from df to list (ends up with id as character)
-    de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
-    
-    # dataElement vars
-    # names( de )
-    display.vars = c('name', 'zeroIsSignificant', 'id', 'lastUpdated',
-                                 'categoryCombo' )
-    
-    mal = grepl( 'malaria' , de$name , ignore.case = TRUE )
-    TB = grepl( 'tb' , de$name , ignore.case = TRUE )
-    HIV = grepl( 'hiv' , de$name , ignore.case = TRUE )    
-    imm = grepl( 'imm' , de$name , ignore.case = TRUE )   
-    conf = grepl( 'conf' , de$name , ignore.case = TRUE )
-    susp = grepl( 'susp' , de$name , ignore.case = TRUE )
-    opd = grepl( '\\<opd\\>' , de$name , ignore.case = TRUE )
-    ipd = grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )
-    patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
-         !grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) &
-         !grepl( '\\<tb\\>' , de$name , ignore.case = TRUE )
-    attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
-    pop = grepl( 'pop' , de$name , ignore.case = TRUE )
-    
-    search_words = c('malaria', 'TB', 'HIV' , 'imm', 'conf','susp', '\\<patient\\>', '\\<attendance\\>', 'opd', 'ipd' , 'pop')
-    
-    search = 
-        map_df( search_words, ~data_frame(
-        search_string = .x ,
-        index =  list( grepl( .x , de$name , ignore.case = TRUE ) ) ,
-        count = sum(  grepl( .x , de$name , ignore.case = TRUE ) )
-    ))
-    
-    kable( search %>% select( search_string, count ), row.names = TRUE)
-
-    # review names and select most appropriate
-    de.names = unique( de$name[ search$index[[1]]| #malaria
-                                    search$index[[10]]| #ipd
-                                    search$index[[8]]| #attendance
-                                    search$index[[11]] ] ) #population
-    
-    de.names_review = data_frame( 
-        Include = rep( NA, length( de.names ) ) ,
-        dataElement = de.names )
-    
-    # write file that will be used to review and select data elements 
-    # de.review.csv = paste0( params$data_directory , "/" ,
-    #                              params$origin_login_file , "/" ,
-    #                              params$origin_login_file , "_" , 
-    #                              "dataElements.csv" )
-    # 
-    # write_csv( de.names_review , de.review.csv )
-    
-    de.review.xlsx = paste0( params$data_directory , "/" ,
-                                 params$origin_login_file , "/" ,
-                                 params$origin_login_file , "_" , 
-                                 "dataElements.xlsx" )
-    
-    if ( !file.exists( de.review.xlsx ) ) openxlsx::write.xlsx( de.names_review , de.review.xlsx )
-    
-```
-
+Data from selected data will be downloaded for the period 2013-2017, from all organizational units, as totals and details (with categoryOptionCombos).
 
 ```{r data_elements_include }
 
@@ -254,10 +190,10 @@ login_origin = function(){
 ```{r fetch_data_values_total }
 
   data.totals.file = paste0( origin.folder , 
-                     params$origin_login_file, 
+                     origin_login_file, 
                      "_dataset_totals.rds" )
 
-    if ( file.exists( data.file ) ){
+    if ( file.exists( data.totals.file ) ){
         
           data_totals = readRDS( data.totals.file ) 
                                 
@@ -349,7 +285,7 @@ The totals data was downloaded on `r data_totals_date`
 ```{r fetch_data_values_details }
 
   data.details.file = paste0( origin.folder , 
-                     params$origin_login_file, 
+                     origin_login_file, 
                      "_dataset_details.rds" )
 
     if ( file.exists( data.details.file ) ){
@@ -481,11 +417,85 @@ The following table is sorted by the difference between sums for each variable.
         )
     
     left_join( sum_details , sum_totals, by = 'dataElement' ) %>%
+        left_join( md$dataElements %>% select( id, name ) , 
+                   by = c( 'dataElement' = 'id' ) 
+                   ) %>%
+        select( dataElement, name, sum_details, sum_totals ) %>% 
         mutate( difference = abs( sum_totals - sum_details ) )  %>%
-        arrange( -difference ) 
+        arrange( -difference ) %>%
+        mutate_if( is.numeric, comma )
     
+```
 
+Why are some totals > than sum of details/categories?
+
+```{r}
+# summarise and compare by period
+
+    # choose data element to examine
+    de = 'GOXEXTR0uST'
+
+# Compare by month
+    sum_details = data_details %>%
+        filter( dataElement %in% de ) %>%
+        group_by( dataElement , period) %>%
+        summarise(
+            sum_details = sum( as.numeric( value ) , na.rm = TRUE ) 
+        )
+
+    sum_totals = data_totals %>%
+        filter( dataElement %in% de ) %>%
+        group_by( dataElement , period ) %>%
+        summarise(
+            sum_totals = sum( as.numeric( value ) , na.rm = TRUE ) 
+        )
     
+    left_join( sum_details , sum_totals, 
+               by = c( 'dataElement', 'period' ) 
+               ) %>%
+        select( period, sum_details, sum_totals ) %>% 
+        mutate( difference = abs( sum_totals - sum_details ) )  %>%
+        arrange( -difference ) %>%
+        mutate_if( is.numeric, comma )
+    
+# Compare by month, orgUnit
+    sum_details = data_details %>%
+        filter( dataElement %in% de )  %>%
+        group_by( dataElement , period, orgUnit ) %>%
+        summarise(
+            sum_details = sum( as.numeric( value ) , na.rm = TRUE ) 
+        )
+
+    sum_totals = data_totals %>%
+        filter( dataElement %in% de ) %>%
+        group_by( dataElement , period, orgUnit ) %>%
+        summarise(
+            sum_totals = sum( as.numeric( value ) , na.rm = TRUE ) 
+        )
+    
+    compare = left_join( sum_details , sum_totals, 
+               by = c( 'dataElement', 'period' , 'orgUnit' ) 
+               ) %>%
+        left_join( md$organisationUnits %>% select( id, name ) ,
+                   by = c( 'orgUnit' = 'id' ) ) %>%
+        select( period, orgUnit, name, sum_details,  sum_totals ) %>% 
+        mutate( difference = abs( sum_totals - sum_details ) )  %>%
+        arrange( -difference ) %>%
+        mutate_if( is.numeric, comma ) 
+    
+    compare %>% filter( difference > 0 ) %>% View
+    
+    count( compare %>% filter( difference > 0 ), period ) %>% print( n = 100 )
+    
+    # look at details...
+    data_details %>% 
+        select(dataElement,period, orgUnit, categoryOptionCombo, value) %>%
+        filter( dataElement %in% de, 
+                period %in% '201506',
+                orgUnit %in% (compare %>% filter( difference > 0 ) %>% .$orgUnit) ) %>%
+        spread( categoryOptionCombo, value ) %>%
+        left_join( compare ) %>%
+        View
 ```
 
 

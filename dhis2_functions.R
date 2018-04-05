@@ -1,9 +1,9 @@
 # functions to get dhis data
 
-loginDHIS2<-function(baseurl,username,password) {
-  url<-paste0(baseurl,"api/me")
-  r<-GET(url,authenticate(username,password))
-  assert_that(r$status_code == 200L) }
+loginDHIS2<-function( baseurl, username, password) {
+  url<-paste0( baseurl, "api/me" )
+  r <- GET(url, authenticate(username,password) )
+  assert_that( r$status_code == 200L ) }
   
 
 ## gets json text from url and converts to data frame 
@@ -29,7 +29,7 @@ get = function( source_url , ...){
 # The whole shebang...All Metadata   ####
   if (element %in% 'all'){
     
-    url<-paste0(baseurl,"api/metadata.json")
+    url<-paste0( baseurl, "api/metadata.json" )
     met = get( url ) 
     
     
