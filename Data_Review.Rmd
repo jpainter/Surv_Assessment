@@ -1,22 +1,21 @@
 ---
-title: "Desktop Data Review"
-
 output:
   html_document:
-    css: custom.css
+    # css: custom.css
     toc: true
     toc_float: true
     code_folding: hide
 editor_options: 
   chunk_output_type: console
 params:
-  origin_login_file: Uganda
-  data_directory: ../HMIS/DHIS2
+  dhis_instance: Uganda
+  data_directory:  ../HMIS/DHIS2
+  output_directory: ./
   cache: FALSE
-  echo: TRUE
+  echo: FALSE
 ---
 
-# **`r params$origin_login_file`** {.tabset .tabset-fade}
+# **`r params$dhis_instance`** {.tabset .tabset-fade}
 <!-- load libraries... -->
 
 ```{r packages, message=FALSE, include= FALSE }
@@ -54,16 +53,21 @@ knitr::opts_chunk$set( echo = params$echo ,
 source('dhis2_functions.R')
 
     
-origin.folder = paste0( params$data_directory , "/" , params$origin_login_file , "/")
+    data_directory = params$data_directory
+    dhis_instance = params$dhis_instance
+    output_directory = params$output_directory
+  
+  # folder for storing review data
 
-origin_login_file = params$origin_login_file
-
+  origin.folder = paste0( data_directory , "/" ,
+                          dhis_instance , "/")
+  
  # login shortcuts
 
 login_origin = function(){
     source( 
     paste0( origin.folder, 
-            tolower( params$origin_login_file) , 
+            tolower( params$dhis_instance) , 
             "_login" )
     )
 
@@ -75,8 +79,9 @@ login_origin = function(){
 
 ```{r all_meta }
 
-  meta_data_file = paste0( origin.folder , 
-                           params$origin_login_file, "_metadata.rds" ) 
+  meta_data_file = paste0( origin.folder ,
+                           dhis_instance, 
+                           "_metadata.rds" )
 
   if ( !file.exists( meta_data_file) ){
    
@@ -101,6 +106,9 @@ login_origin = function(){
   date_metadata = file.info( meta_data_file )$ctime 
   
 ```
+
+Data from selected data will be downloaded for the period 2013-2017, from all organizational units, as totals and details (with categoryOptionCombos).
+
 
 
 ```{r date_strings }
@@ -136,12 +144,13 @@ login_origin = function(){
 ```
 
 
+
 ```{r ou_levels}
 
-    md$organisationUnitLevels %>% 
-    select( id, name , level) %>% 
-    arrange( level ) %>%
-    kable
+    # md$organisationUnitLevels %>% 
+    # select( id, name , level) %>% 
+    # arrange( level ) %>%
+    # kable
 
   # levels
       levels = character()
@@ -157,13 +166,18 @@ login_origin = function(){
   
 ```
 
-## Data elements 
 
-Data from selected data will be downloaded for the period 2013-2017, from all organizational units, as totals and details (with categoryOptionCombos).
+
+# Data elements {.tabset .tabset-fade}
+
 
 ```{r data_elements_include }
 
-    # de.include = read_csv( de.review.filename  )
+    de.review.xlsx = paste0( output_directory , "/" ,
+                             dhis_instance , "/" ,
+                             dhis_instance , "_" , 
+                             "dataElements.xlsx" )
+
 
     de.include = readxl::read_xlsx( de.review.xlsx  ) %>% filter( !is.na(Include) )
 
@@ -185,12 +199,13 @@ Data from selected data will be downloaded for the period 2013-2017, from all or
 
 ```
 
+
 ## DataElements : Totals 
 
 ```{r fetch_data_values_total }
 
   data.totals.file = paste0( origin.folder , 
-                     origin_login_file, 
+                     dhis_instance, 
                      "_dataset_totals.rds" )
 
     if ( file.exists( data.totals.file ) ){
@@ -274,18 +289,44 @@ Data from selected data will be downloaded for the period 2013-2017, from all or
       
     data_totals_date = file.info(data.totals.file)$mtime
 
-    glimpse( data_totals ) 
+    # glimpse( data_totals ) 
 
 ```
 
 The totals data was downloaded on `r data_totals_date`
+
+
+```{r count_dataElements_in_data, comment="" }
+
+  # List data elements by name
+  data_totals %>% 
+    # names of data elements
+    left_join( select(md$dataElements, id, name) ,
+                      by = c("dataElement" = "id")
+                      ) %>%
+    select( -dataElement ) %>% 
+    rename( dataElement = name ) %>%
+    # summarise reports by dataElement
+    group_by( dataElement) %>% 
+    summarise( 
+        Reported = n() ,
+        orgUnits = n_distinct( orgUnit ) ,
+        First =  as.yearmon( min( period ), "%Y%m") %>% format(., "%b-%Y"),
+        Last = as.yearmon( max( period ), "%Y%m") %>% format(., "%b-%Y")
+        ) %>% 
+    arrange( -Reported ) %>%
+    mutate( Reported = comma( Reported ), 
+            orgUnits = comma( orgUnits ) 
+            ) %>%
+    datatable( rownames = FALSE, options= list( pageLength = 15, scrollY = TRUE ) )
+```
 
 ## DataElements : Details
 
 ```{r fetch_data_values_details }
 
   data.details.file = paste0( origin.folder , 
-                     origin_login_file, 
+                     dhis_instance, 
                      "_dataset_details.rds" )
 
     if ( file.exists( data.details.file ) ){
@@ -390,13 +431,52 @@ The totals data was downloaded on `r data_totals_date`
       saveRDS( data_details, data.details.file )
 }
       
-    glimpse( data_details ) 
+    # glimpse( data_details ) 
     
     data_details_date = file.info(data.details.file)$mtime
     
 ```
 
 The detailed data was downloaded on `r data_details_date`
+
+Summarise data values by dataElement_categoryOptionCombo
+
+```{r summarise_data_variables }
+   dd = data_details %>%
+        inner_join( md$dataElements %>% select( id , name ) ,
+                    by = c( 'dataElement' = 'id' ) ) %>%
+        rename( de.name = name )  %>%
+        inner_join( md$categoryOptionCombos %>% select( id , name ) ,
+                    by = c( 'categoryOptionCombo' = 'id' ) ) %>%
+        rename( cat.name = name )  %>%
+        unite( element_combo , de.name, cat.name )
+
+    # spread data so that each column is a variable; keep only numeric cols
+    df = dd %>% 
+        # select( orgUnit, period,  element_combo, value ) %>%
+        mutate( value = as.numeric( value )) %>%
+        spread( element_combo, value  ) %>%
+        purrr::keep(is.numeric)
+    
+    # glimpse(df) 
+    
+    do.call( data.frame , 
+           list(Element = names(df ) ,
+                mean = map_dbl( df , ~round( mean( .x , na.rm = TRUE ) ) ) ,
+                sd = map_dbl(df , ~round( sd( .x , na.rm = TRUE) ) ) ,
+                median = map_dbl(df  , median, na.rm = TRUE) ,
+                min = map_dbl(df , min, na.rm = TRUE) ,
+                max = map_dbl(df  , max, na.rm = TRUE) ,
+                n = map_dbl(df  , length) ,
+                nmiss =  map_dbl(df , ~sum( is.na(.x) ) )
+           )) %>%
+        mutate_if( is.numeric , comma ) %>% 
+        datatable( rownames = FALSE , options = list( pageLength = 15) )
+    
+    
+```
+
+
 
 ## Verify:  Sum of data-details equals data-totals
 
@@ -423,13 +503,15 @@ The following table is sorted by the difference between sums for each variable.
         select( dataElement, name, sum_details, sum_totals ) %>% 
         mutate( difference = abs( sum_totals - sum_details ) )  %>%
         arrange( -difference ) %>%
-        mutate_if( is.numeric, comma )
+        mutate_if( is.numeric, comma ) %>%
+        datatable()
     
 ```
 
-Why are some totals > than sum of details/categories?
+Why are some totals > than sum of details/categories? (only evaluate if there is problem verify that sum(details) = totals)
 
-```{r}
+```{r, eval = FALSE}
+
 # summarise and compare by period
 
     # choose data element to examine
@@ -499,70 +581,8 @@ Why are some totals > than sum of details/categories?
 ```
 
 
-Summarise data values by dataElement_categoryOptionCombo
 
-```{r summarise_data_variables }
-   dd = data_details %>%
-        inner_join( md$dataElements %>% select( id , name ) ,
-                    by = c( 'dataElement' = 'id' ) ) %>%
-        rename( de.name = name )  %>%
-        inner_join( md$categoryOptionCombos %>% select( id , name ) ,
-                    by = c( 'categoryOptionCombo' = 'id' ) ) %>%
-        rename( cat.name = name )  %>%
-        unite( element_combo , de.name, cat.name )
-
-    # spread data so that each column is a variable
-    df = dd %>% 
-        # select( orgUnit, period,  element_combo, value ) %>%
-        mutate( value = as.numeric( value )) %>%
-        spread( element_combo, value  ) %>%
-        select( -orgUnit, -period )
-    
-    do.call( data.frame , 
-           list(
-               Element = names( df ) ,
-               mean = map_dbl(df, ~round( mean( .x , na.rm = TRUE ) ) ),
-                sd = map_dbl(df, ~round( sd( .x , na.rm = TRUE) ) ) ,
-                median = map_dbl(df, median, na.rm = TRUE) ,
-                min = map_dbl(df, min, na.rm = TRUE) ,
-                max = map_dbl(df, max, na.rm = TRUE) ,
-                n = map_dbl(df, length) ,
-                nmiss =  map_dbl(df, ~sum( is.na(.x) ) )
-           )) %>%
-        mutate_if( is.numeric , comma ) %>% 
-        datatable( rownames = FALSE , options = list( pageLength = 15) )
-```
-
-
-
-## Data: data elements
-
-NB:  the counts include all of the option combos.  TODO:  recalculate
-
-```{r count_dataElements_in_data, comment="" }
-
-  # List data elements by name
-  data_details %>% 
-    # names of data elements
-    left_join( select(md$dataElements, id, name) ,
-                      by = c("dataElement" = "id")
-                      ) %>%
-    select( -dataElement ) %>% 
-    rename( dataElement = name ) %>%
-    # summarise reports by dataElement
-    group_by( dataElement) %>% 
-    summarise( 
-        Reported = n() ,
-        orgUnits = n_distinct( orgUnit ) ,
-        First =  as.yearmon( min( period ), "%Y%m") %>% format(., "%b-%Y"),
-        Last = as.yearmon( max( period ), "%Y%m") %>% format(., "%b-%Y")
-        ) %>% 
-    arrange( -Reported ) %>%
-    mutate( Reported = comma( Reported ), 
-            orgUnits = comma( orgUnits ) 
-            ) %>%
-    datatable( rownames = FALSE, options= list( pageLength = 15, scrollY = TRUE ) )
-```
+# Data Sets {.tabset .tabset-fade}
 
 ## Data: data sets
 
@@ -607,7 +627,8 @@ NB:  the counts include all of the option combos.  TODO:  recalculate
 
 - Continuity
 
-## Trends
+
+# Trends {.tabset .tabset-fade}
 
 - Identify most important dataElements and dataSets (do this nationally, and by county)
 

@@ -5,18 +5,22 @@ output:
     toc: true
     toc_float: true
     code_folding: hide
+  pdf_document: default
+  word_document: 
+    toc: true
 editor_options: 
   chunk_output_type: console
 params:
-  origin_login_file: training_sierra_leone
+  dhis_instance: Uganda
   data_directory: ../HMIS/DHIS2
+  output_directory: ./ 
   cache: FALSE
-  echo: TRUE
+  echo: FALSE
 ---
 
 <!-- NB:  when changing to country for review, MUST clear cache.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->
 
-# **`r toupper( params$origin_login_file )`**
+# **`r toupper( params$dhis_instance )` Metadata**
 
 
 ```{r packages, echo = TRUE, cache=FALSE, warning=FALSE, include = FALSE }
@@ -56,25 +60,18 @@ knitr::opts_chunk$set( echo = params$echo ,
   source( 'dhis2_functions.R'  )
 
     data_directory = params$data_directory
-    origin_login_file = params$origin_login_file
+    dhis_instance = params$dhis_instance
+    output_directory = params$output_directory
   
   # folder for storing review data
 
   origin.folder = paste0( data_directory , "/" ,
-                          origin_login_file , "/")
+                          dhis_instance , "/")
 
- 
-  # folder = paste0( origin.folder ,  params$origin_login_file  , "/" )
-  #   
-  # if ( !dir.exists( folder ) ){
-  #   dir.create( folder ) 
-  # } 
- 
-  
   # origin.login shortcut
    origin.login = function(){
        source( paste0( origin.folder , 
-                       tolower( origin_login_file ) , 
+                       tolower( dhis_instance ) , 
                        "_login")  )
        # print( baseurl )
        loginDHIS2( baseurl, username, password)
@@ -120,14 +117,11 @@ knitr::opts_chunk$set( echo = params$echo ,
 ```
 
 
-
-# Metadata {.tabset .tabset-fade}
-
 ## Metadata Structure
 ```{r all_meta }
 
-  meta_data_file = paste0( origin.folder , 
-                           origin_login_file, 
+  meta_data_file = paste0( origin.folder ,
+                           dhis_instance, 
                            "_metadata.rds" ) 
 
   if ( !file.exists( meta_data_file) ){
@@ -157,7 +151,7 @@ knitr::opts_chunk$set( echo = params$echo ,
 
 Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.    
 
-`r params$origin_login_file` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`), last updated `r md$system$date`.
+`r params$dhis_instance` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`), last updated `r md$system$date`.
 
 ```{r list_viewer }
  jsonedit( md )
@@ -344,8 +338,11 @@ NB  confirm whether all units assigned to category
 
 # Data Elements {.tabset .tabset-fade}
 
+## Keywords 
+
 String search for data elements.  Note that when \<*words*<\ are surrounded by '\<', the search is looking for the whole word (with leading and trailing space). 
-```{r select_data_elements}
+
+```{r search_data_elements}
     de = md$dataElements
     
     # Convert category combo from df to list (ends up with id as character)
@@ -356,19 +353,19 @@ String search for data elements.  Note that when \<*words*<\ are surrounded by '
     display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
                                  'categoryCombo', 'id' )
     
-    # mal = grepl( '\\<malaria\\>' , de$name , ignore.case = TRUE )
-    # TB = grepl( '\\<tb\\>' , de$name , ignore.case = TRUE )
-    # HIV = grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE )    
-    # imm = grepl( 'imm' , de$name , ignore.case = TRUE )   
-    # conf = grepl( 'conf' , de$name , ignore.case = TRUE )
-    # susp = grepl( 'susp' , de$name , ignore.case = TRUE )
-    # opd = grepl( '\\<opd\\>' , de$name , ignore.case = TRUE )
-    # ipd = grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )
-    # patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
-    #      !grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) &
-    #      !grepl( '\\<tb\\>' , de$name , ignore.case = TRUE )
-    # attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
-    # pop = grepl( 'pop' , de$name , ignore.case = TRUE )
+    mal = grepl( '\\<malaria\\>' , de$name , ignore.case = TRUE )
+    TB = grepl( '\\<tb\\>' , de$name , ignore.case = TRUE )
+    HIV = grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE )
+    imm = grepl( 'imm' , de$name , ignore.case = TRUE )
+    conf = grepl( 'conf' , de$name , ignore.case = TRUE )
+    susp = grepl( 'susp' , de$name , ignore.case = TRUE )
+    opd = grepl( '\\<opd\\>' , de$name , ignore.case = TRUE )
+    ipd = grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )
+    patients = grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
+         !grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) &
+         !grepl( '\\<tb\\>' , de$name , ignore.case = TRUE )
+    attendance = grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE )
+    pop = grepl( 'pop' , de$name , ignore.case = TRUE )
     
     search_words = c('\\<malaria\\>', '\\<tb\\>', '\\<hiv\\>' , 'imm', 'conf', 'susp', '\\<patient\\>', '\\<attendance\\>', '\\<opd\\>', '\\<ipd\\>' , 'pop')
     
@@ -483,10 +480,10 @@ NB: Future versions should aspire to having a more elegant interface for selecti
         Include = rep( NA, length( de.names ) ) ,
         dataElement = de.names )
     
-    de.review.xlsx = paste0( params$data_directory , "/" ,
-                                 params$origin_login_file , "/" ,
-                                 params$origin_login_file , "_" , 
-                                 "dataElements.xlsx" )
+    de.review.xlsx = paste0( output_directory , "/" ,
+                             dhis_instance , "/" ,
+                             dhis_instance , "_" , 
+                             "dataElements.xlsx" )
     
     if ( !file.exists( de.review.xlsx ) ) openxlsx::write.xlsx( de.names_review , de.review.xlsx )
     
