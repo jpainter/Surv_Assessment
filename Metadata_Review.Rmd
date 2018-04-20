@@ -12,7 +12,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Guinea
+  dhis_instance: Malawi
   data_directory: ../DHIS2
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -21,7 +21,7 @@ params:
 
 <!-- NB:  when changing to country for review, MUST clear cache.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->
 
-# **`r toupper( params$dhis_instance )` Metadata**
+# **`r toupper( params$dhis_instance )` Metadata** {.tabset .tabset-fade}
 
 
 ```{r packages, echo = TRUE, cache=FALSE, warning=FALSE, include = FALSE }
@@ -66,7 +66,9 @@ knitr::opts_chunk$set( echo = params$echo ,
   
   # folder for storing review data
 
-  origin.folder = paste0( data_directory , "/" ,
+  origin.folder = paste0( ifelse( is.null( data_directory ), "" , 
+                                  paste0( data_directory, "/" ) 
+                                  ) ,
                           dhis_instance , "/")
   
   # if does not exist, create folder for review
@@ -170,6 +172,8 @@ Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `*
 
 `r params$dhis_instance` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`), last updated `r md$system$date`.
 
+
+
 ```{r list_viewer, eval= FALSE }
  jsonedit( md )
 ```
@@ -268,7 +272,7 @@ feature_type = function( coordinate ){
 ```
 
 
-There, `r sum( map_lgl( md$organisationUnits$attributeValues , ~length(.x) > 0 ) )` have an attribute values assigned to OU.  
+There are, `r sum( map_lgl( md$organisationUnits$attributeValues , ~length(.x) > 0 ) )` attribute values assigned to OU.  
 
 
 ## OU Levels
@@ -392,7 +396,7 @@ NB  confirm whether all units assigned to category
 
 # Data Elements {.tabset .tabset-fade}
 
-## Keywords 
+## Search phrases 
 
 String search for data elements.  Note that when \\<*words*<\\ are surrounded by '\\<', the search is looking for the whole word (with leading and trailing space). 
 
@@ -464,7 +468,11 @@ String search for data elements.  Note that when \\<*words*<\\ are surrounded by
 
 ```{r de.list}
 
-de. = de[ , display.vars ] %>%
+    de.list = function( filter ){   
+    
+        filter = eval_tidy( filter )
+        
+        de.filter = de[ filter , display.vars ] %>%
             rename( categoryCombo.id = categoryCombo ) %>%
             mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
             
@@ -486,12 +494,6 @@ de. = de[ , display.vars ] %>%
                     unnest ,
                 by = 'id'
                 )  
-
-    de.list = function( filter ){   
-    
-        filter = eval_tidy( filter )
-        
-        de.filter = de.[ filter , ] 
             
         
         kable(
@@ -564,45 +566,7 @@ TODO: Inspect organization of data Element groups?  Which var are assigned to gr
 - Look at other dataElements in the group to see if missing something.
 
 
-## Select variables...
 
-- There are `r comma( length( md$dataElements$id ) ) ` data elements, each with potential multiple option combinations (e.g. age groups)
-
-- Lets select some data elements using key word (or parital word) searches.  A spreadsheet will be created in the data directory listing data elements with 'malaria', 'ipd', 'attendance', and 'pop'.  
-
-- Open the spreadsheet:  when openned the column **Include** is blank.  Any character in the sheet will mark the variable for inclusion.
-
-- Save the sheet, then run the Data_Review.Rmd file to assess the data.  
-
-NB: Future versions should aspire to having a more elegant interface for selecting variables.
-
-```{r select_data_elements}
-    
-    # review names and select most appropriate
-    # de.names = unique( de$name[ search$index[[1]]| #malaria
-    #                                 search$index[[10]]| #ipd
-    #                                 search$index[[8]]| #attendance
-    #                                 search$index[[11]] ] ) #population
-
-    de.names.review = map_df( c(mal, pop) ,
-                              ~ de.[ eval_tidy( .x ) , c('name', 'Group') ] ) %>%
-            rename( dataElement = name ) %>%
-            mutate(  Include = NA ) %>%
-            select( Include, dataElement ,  Group )
-
-    # de.names_review = data_frame( 
-    #     Include = rep( NA, nrow( de.names ) ) ,
-    #     dataElement = de.names )
-    
-    de.review.xlsx = paste0( output_directory , "/" ,
-                             dhis_instance , "/" ,
-                             dhis_instance , "_" , 
-                             "dataElements.xlsx" )
-    
-    if ( !file.exists( de.review.xlsx ) ) openxlsx::write.xlsx( de.names.review ,
-                                                                de.review.xlsx )
-    
-```
 
 # Categories
 
@@ -684,6 +648,7 @@ Are there more than one category associated with a category combo?
 
 ## All Datasets 
 
+<!-- TODO: show dataset- group- and data elements together -->
 
 ```{r datatable_dataElements}
 
@@ -948,4 +913,73 @@ Count the org units assigned to each form, which is the basis for the number of 
   datatable( gt1datset )
 
 ```
+
+## Select variables...
+
+- There are `r comma( length( md$dataElements$id ) ) ` data elements, each with potential multiple option combinations (e.g. age groups)
+
+- Lets select some data elements using key word (or parital word) searches.  A spreadsheet will be created in the data directory listing data elements with 'malaria', 'ipd', 'attendance', and 'pop'.  
+
+- Open the spreadsheet:  when openned the column **Include** is blank.  Any character in the sheet will mark the variable for inclusion.
+
+- Save the sheet, then run the Data_Review.Rmd file to assess the data.  
+
+NB: Future versions should aspire to having a more elegant interface for selecting variables.
+
+```{r select_data_elements}
+    
+    de.review.xlsx = paste0( output_directory , "/" ,
+                             dhis_instance , "/" ,
+                             dhis_instance , "_" , 
+                             "dataElements.xlsx" )
+
+    # Create excel worksheet with separate tab for each search
+
+    l = map( seq_along( searches ) ,
+            
+            ~de[ eval_tidy( searches[[.x]] )  , display.vars ] %>%
+            rename( categoryCombo.id = categoryCombo ) %>%
+            mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+            
+            # categoryCombos
+            left_join(  
+                select( md$categoryCombos, id, name, categories ) %>%
+                            rename(categoryCombo.id = id,
+                                   categoryCombo = name ,
+                                   category.id = categories
+                            ) , 
+                        by = 'categoryCombo.id'
+                        ) %>%
+        
+            # dataElementGroups
+            left_join( 
+                md$dataElementGroups %>% 
+                    select( name, dataElements) %>%
+                    rename( Group = name ) %>% 
+                    unnest ,
+                by = 'id'
+                ) %>%  
+
+            rename( dataElement = name ) %>%
+            mutate(  Include = NA ) %>%
+            select( Include, dataElement , Group , categoryCombo) %>%
+            arrange( Group, dataElement )
+    )
+    
+    names(l) = names.searches
+
+ 
+    # if ( !file.exists( de.review.xlsx ) ){
+        
+        openxlsx::write.xlsx( l ,
+                              de.review.xlsx )
+    # } 
+    
+    
+```
+
+# Indicators  {.tabset .tabset-fade} 
+
+<!-- TODO : definitions for indicators  -->
+
 
