@@ -8,7 +8,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Malawi
+  dhis_instance: Sierra Leone Demo
   data_directory:  
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -229,22 +229,34 @@ feature_type = function( coordinate ){
 
 ```{r data_elements_include }
 
+
     de.review.xlsx = paste0( output_directory , "/" ,
                              dhis_instance , "/" ,
                              dhis_instance , "_" , 
                              "dataElements.xlsx" ) 
 
-
-    de.include = readxl::read_xlsx( de.review.xlsx  ) %>% 
+    sheets = excel_sheets(de.review.xlsx)
+    
+    # get selected rows from every spreadsheet tab
+    de.include = map_df( seq_along(sheets) , ~readxl::read_xlsx( de.review.xlsx , 
+                                                            sheet = .x ) %>% 
         filter( !is.na(Include) ) %>% 
         distinct( dataElement, .keep_all = TRUE )
-
+    )
+    
+    
     # if none selected, pick intersection of malaria and confirmed 
     if ( nrow( de.include) == 0 ){
-        de.mal = readxl::read_xlsx( de.review.xlsx , sheet = 'mal' )
-        de.conf = readxl::read_xlsx( de.review.xlsx , sheet = 'conf' )
+        
+        de.mal = readxl::read_xlsx( de.review.xlsx , sheet = 'mal' ) %>%
+            .$dataElement %>% unique
+        
+        de.conf = readxl::read_xlsx( de.review.xlsx , sheet = 'conf' ) %>%
+            .$dataElement %>% unique
+        
         include = intersect( de.mal$dataElement,
                                 de.conf$dataElement)
+        
         
         de.include = readxl::read_xlsx( de.review.xlsx  ) %>% 
             filter( dataElement %in% include ) %>% 
@@ -271,7 +283,12 @@ feature_type = function( coordinate ){
           
     } else {
             
-        data_totals = api_data()
+        data_totals = api_data( periods = periods.vector , 
+                                levels = levels.vector , 
+                                de.vars = de.include ,
+                                file = "" ,
+                                details = FALSE , 
+                                submissions =  FALSE )
         
         print( paste( "TOTAL:", 
                        scales::comma( nrow( data_totals ) ) , 
@@ -385,7 +402,12 @@ The totals data, `r scales::comma( nrow( data_totals ) )` records,  was download
           
     } else {
             
-        data_details = api_data( details = TRUE )
+        data_details = api_data( periods = periods.vector , 
+                                levels = levels.vector , 
+                                de.vars = de.include ,
+                                file = "" ,
+                                details = TRUE , 
+                                submissions =  FALSE )
         
         # save data
         saveRDS( data_details, data.details.file )
@@ -607,7 +629,12 @@ Values shown are for the periods from `r min(periods.vector)` to `r max(periods.
           
     } else {
             
-        data_submissions = api_data( submissions = TRUE )
+        data_submissions = api_data( periods = periods.vector , 
+                                levels = levels.vector , 
+                                de.vars = de.include ,
+                                file = "" ,
+                                details = FALSE , 
+                                submissions =  TRUE )
         
         # save data
         saveRDS( data_submissions, dataset.submission.file )

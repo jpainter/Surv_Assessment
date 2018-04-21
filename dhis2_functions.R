@@ -305,9 +305,9 @@ get = function( source_url , ...){
  # renderInventory('uganda')
  
 # api_data #####
- api_data = function( periods = periods.vector , 
-                      levels = levels.vector , 
-                      de.vars = de.include ,
+ api_data = function( periods = NA , 
+                      levels = NA , 
+                      de.vars = NA ,
                       file = "" ,
                       details = FALSE , 
                       submissions =  FALSE
