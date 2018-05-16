@@ -1,4 +1,8 @@
 # functions to get dhis data
+library(tidyselect)
+library( jsonlite )
+library(httr)
+library(assertthat)
 
 # Login ####
 loginDHIS2<-function( baseurl, username, password) {

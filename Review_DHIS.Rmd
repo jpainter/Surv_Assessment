@@ -1,0 +1,216 @@
+---
+title: "DHIS_Review"
+date: "April 6, 2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+params:
+  dhis_instance: Sierra Leone Demo
+  data_directory:  
+  output_directory: ./ # bug: only uses current directory
+  output_format: html_document
+  create_new: FALSE 
+  cache: FALSE
+  echo: FALSE
+---
+
+
+```{r package_list, message=FALSE, include= FALSE, warning= FALSE }
+
+# list of required packages
+    package.list = c( "openxlsx", "readxl" , "rlist", "knitr", "rmarkdown", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "broom" , "Hmisc", "plotly" , "skimr", "tidyverse" )
+
+# Function to test if package is installed 
+    pkgTest <- function( package.list = package.list ){
+        
+        missing.packages = setdiff( package.list , rownames(installed.packages())) 
+        if ( length( missing.packages ) > 0 ) install.packages( missing.packages ) 
+    }
+
+
+# Test if packages loaded
+    pkgTest( package.list )
+
+# load the packages
+    lapply( package.list, suppressMessages( require ) , character.only = TRUE)
+
+
+# load accessory functions
+source('dhis2_functions.R')
+
+```
+
+
+```{r knitr_setup, include = FALSE}
+knitr::opts_chunk$set( echo = params$echo ,
+                       comment = "" ,
+                       cache = params$cache , 
+                       fig.width =  8
+                       )
+
+
+    dhis_instance = params$dhis_instance
+    data_directory = params$data_directory  # folder containing login_file 
+    output_format = params$output_format
+    
+    # this folder will hold output of the metadata and data reviews
+    output_directory =  getwd() # "." is the directory where this file sits. 
+    
+    origin.folder = paste0( ifelse( is.na( data_directory ), "" , 
+                                  paste0( dhis_instance, "/" ) 
+                                  ) ,
+                          dhis_instance , "/")
+    
+    if (!dir.exists( origin.folder ) ) dir.create( origin.folder )
+    
+  
+ # login shortcuts
+
+login_origin = function(){
+    source( 
+    paste0( origin.folder, 
+            tolower( params$dhis_instance) , 
+            "_login" )
+    )
+
+  loginDHIS2( baseurl, username, password)
+}
+
+# test login 
+ assert_that( login_origin() )
+  
+    
+```
+
+
+```{r parameters2 }
+    params.list = list(
+        dhis_instance = dhis_instance , # selects dhis2 instance
+        data_directory = data_directory ,  # root data directory
+        output_directory = output_directory ,
+        cache = FALSE ,
+        echo = FALSE 
+    )
+
+    outputs = data_frame( 
+        output_format = c(  "html_document", 'word_document'),
+        output_suffix = c(  "html", 'doc')
+    )
+    
+    output.suffix = outputs %>% 
+        filter( output_format == params$output_format ) %>% 
+        .$output_suffix
+```
+
+# **`r toupper( params$dhis_instance )` **
+
+This script creates the review documents 
+
+## Metadata
+
+```{r Metadata_Review }
+    output.filename = paste0( output_directory, "/" ,
+                              dhis_instance, "/", 
+                             dhis_instance, "_Metadata_Review." ,
+                             output.suffix
+                             ) 
+    if ( !file.exists( output.filename ) | params$create_new ) { 
+
+        render('Metadata_Review.Rmd',
+           output_file = output.filename ,
+           output_format = output_format ,
+           # 'knitrBootstrap::bootstrap_document' ,
+           params = params.list ,
+           envir = new.env() ,
+           encoding = "UTF-8"
+           )
+         
+    }
+
+   if ( file.exists( output.filename )) browseURL( output.filename ) 
+
+```
+
+
+## Select data elements to review
+
+```{r dataElement_Selection }
+    de.review.xlsx = paste0( output_directory , "/" ,
+                             dhis_instance , "/" ,
+                             dhis_instance , "_" , 
+                             "dataElements.xlsx" )
+    
+    # if exist, open excel file
+    if ( file.exists( de.review.xlsx ) ){
+        
+        # de.include = readxl::read_xlsx( de.review.xlsx  ) %>% 
+        # filter( !is.na(Include) ) %>% 
+        # distinct( dataElement, .keep_all = TRUE )
+        # 
+        # if ( nrow( de.include) > 0 ) browseURL( de.review.xlsx )
+        
+        browseURL( de.review.xlsx )
+    }
+    
+```
+
+
+<!-- May want to re-select after viewing totals, and before downloading details with categoryCombos -->
+
+## Data Element Review
+    
+    Data elements selected from the spreadsheet `r de.review.xlsx` will be accessed for review.  If no elements have been selected from the spreadsheet, the revieww will default to data elements that match the search criteria 'malaria' and 'confirmed'. 
+    
+```{r Data_Review}
+    # if variables selected, download and analyze
+
+    output.filename = paste0(output_directory , "/" ,
+                             dhis_instance, "/", 
+                             dhis_instance, "_Data_Review.html" ) 
+
+     if ( !file.exists( output.filename ) | params$create_new ) { 
+
+        render('Data_Review.Rmd',
+           output_file = output.filename ,
+           output_format = output_format ,
+           # 'knitrBootstrap::bootstrap_document' ,
+           params = params.list ,
+           envir = new.env() ,
+           encoding = "UTF-8"
+           )
+         
+    }
+
+   if ( file.exists( output.filename )) browseURL( output.filename ) 
+
+
+```
+
+## Trends and Quality
+    
+```{r Trend_Review}
+    # if variables selected, download and analyze
+
+    output.filename = paste0(output_directory , "/" ,
+                             dhis_instance, "/", 
+                             dhis_instance, "_Trend_Review.html" ) 
+
+
+     if ( !file.exists( output.filename ) | params$create_new ) { 
+
+        render('DQ_Trends.Rmd',
+           output_file = output.filename ,
+           output_format = output_format ,
+           # 'knitrBootstrap::bootstrap_document' ,
+           params = params.list ,
+           envir = new.env() ,
+           encoding = "UTF-8"
+           )
+         
+    }
+
+   if ( file.exists( output.filename )) browseURL( output.filename ) 
+
+
+```
+

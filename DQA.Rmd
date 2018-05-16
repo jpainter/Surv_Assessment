@@ -1,0 +1,128 @@
+---
+title: "DQA"
+output: 
+    beamer_presentation: default
+    # revealjs::revealjs_presentation:
+    #     text-align: left
+    #     transition: none
+    #     reveal_options:
+    #       slideNumber: true
+    #       previewLinks: true
+    html_document:
+        css: custom.css
+        toc: true
+        toc_float: true
+        fig_caption: true
+        self_contained: true
+---
+<!-- .reveal .slide: style="text-align: left;"> -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+    
+## Motivation
+
+Disease surveillance data is available to guide malaria programs, but substantial gaps exist between having data and using the data.  
+
+Many surveillance evaluation tools, but none are malaria specific, or DHIS2 specific.  
+
+## Essential goals of malaria surveillace
+
+1. Improve allocation of resources
+
+    - if we want to allocate resource geographically, we need to know if routine data is reliable at each level.  
+
+2. Analyze trends
+
+    - if we want to move towards impact evaluation based on routine data, we need to know whether that data is reliable for detecting trends. 
+
+3. Assess key program factors
+    - Appropriate case-management
+    - Delivery of preventive services
+    
+## Take advantage of routine data instead of relying on household surveys
+
+- With demographic household surveys we are stuck with intermittent data at the regional level only. 
+- Routine data provides granularity, but potentially confounded by increased testing and reporting, and therefore may not be useful for interpreting trends.  
+
+    
+## Historically, surveillance system analyses tend to be large effort performed sporadically
+  
+Ideal s
+  
+
+## Objectives of surveillance assessment 
+
+- Determine usability of data for decision making.  Determine the amount of change to key disease variables that can be detected by the surveillance system. Overall soundness of the database design.
+
+# Assumptions and caveats
+
+## Emphasis on data first
+
+Streamline by not attempting to review all elements of surveillance system
+
+- takes too long, and challenging to understand importance of each issue
+
+Start with a data quality review, then conduct other elements of surveillance assessments to focus on identifying biggest underlying and contributing problems   
+
+- May require several iterations to identify problem and confirm progress
+
+## DHIS is Primary Data Platform
+
+The review focuses on countries using **DHIS2** to manage their surveillance data.  For sub-Saharan Africa this is most countries, but not all. We will give examples with assumption that country is using DHIS2.  For those that do not, the examples may serve as a template for examining their surveillance data.  
+
+## Secondary Analysis Required
+
+Some of the techniques used involve secondary analysis with [**R** software]^(https://www.rstudio.com/online-learning/), which enables one to experiment with different analyses and models.   The R platform is free and widely available but skilled users are not as readily available.  
+
+As the review evolves, there should be some effort to make the reporting and analyses easier to perform by a wider audience. One way forward may be [Custom R Charts in Excel]^(http://blog.revolutionanalytics.com/2018/05/powerbi-custom-visuals-in-excel.html).
+
+Draft assessment tool will evolve as we learn what works through piloting
+
+# Issues/Examples  
+## Increasing organizational units
+
+
+## Outliers
+Example: 
+Lesson: uncorrected data entry errors distort data; need to review clinic level data to identify and correct problems
+Follow-up: Focus inquiry on why errors not corrected.  No one responsible for correcting? Lack of training?  etc.  
+
+
+## Districts may by hospitals
+## Too many variables
+## Non-intuitive category combos
+- Category combos meant to streamline data collection, reduce repetition, and provide simplified totals
+## Hidden Variables
+ Example: Uganda stock outs in details of RDT   
+ Lesson: Nee to know where to look for data
+ 
+## Why bother reviewing/searching for relevant variables?  Why not just ask?
+- Great if NMCP contact is aware of all relevant variable and category combinations  
+- Even if well known, may not get all details without prompting
+- Quite possible that contact is unaware of some, especially if NMCP was not integral to design of system, if they do not have direct access, or if they do not have person(s) dedicated to reviewing all relevant data.
+- Category combinations frequently confusing and counter intuitive; can't assume that totals are what you think they are.
+  
+  
+# Qualitative measures of surveillance data
+
+## Plan  
+1. Review metadata to understand how data is organized   
+2. Examine data completeness and identify key variables and datasets   
+3.  Assess trends and gauge noise  
+
+##    1. Review metadata to understand how data is organized:  
+- What is hierarchy of organizational units?   
+- find relevant data elements for disease counts, delivery of services (e.g. ACT, IPTp), stock out, and population counts   
+- understand details of how each element is dis-aggregated (age groups? gender?)   
+- How are indicators defined    
+        
+##    2. Examine data completeness and identify key variables and datasets
+
+- Which variables belong with which datasets   
+- 
+##    3.  Assess trends and gauge noise
+## Tool
+## Field work
