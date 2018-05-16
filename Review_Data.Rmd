@@ -245,8 +245,7 @@ feature_type = function( coordinate ){
         filter( !is.na(Include) ) %>% 
         distinct( dataElement, .keep_all = TRUE )
     )
-    
-    
+
     # if none selected, pick intersection of malaria and confirmed 
     if ( nrow( de.include) == 0 ){
         
@@ -259,10 +258,6 @@ feature_type = function( coordinate ){
         include = intersect( de.mal, de.conf)
         
         
-        de.include = readxl::read_xlsx( de.review.xlsx  ) %>% 
-            filter( dataElement %in% include ) %>% 
-            distinct( dataElement, .keep_all = TRUE )
-
     }
 
 ```

@@ -16,8 +16,8 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Sierra Leone
-  data_directory:  
+  dhis_instance: Malawi
+  data_directory: ../DHIS2
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
   echo: FALSE
@@ -932,6 +932,7 @@ Count the org units assigned to each form, which is the basis for the number of 
 
 ```
 
+
 ## Numbers of reports available for each data element 
 
 - this takes advantage of pivot table option, aggregationType=COUNT.  Example:
@@ -954,8 +955,6 @@ c = get( url )[[1]] %>%
 datatable(c)
 
 ```
-
-
 
 ## Select variables...
 
