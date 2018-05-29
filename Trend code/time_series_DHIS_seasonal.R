@@ -90,25 +90,33 @@ library( lubridate )
   
 
 # Sample #### 
+  
+  # fill in missing dates
+  dates = spread.data %>% count(date) %>% select( date )
+  
   sample = spread.data %>% 
+    full_join( dates, by = "date") %>%
     select( date, `Mwanza-DHO` ) %>% 
     rename( value = `Mwanza-DHO`) %>% 
     filter( !is.na( value) )
   
   # lag-2 to smooth monthly data
   sample2 = spread.data %>% 
+    full_join( dates, by = "date") %>%
     select( date, `Mwanza-DHO` ) %>% 
     rename( value = `Mwanza-DHO`) %>% 
     filter( !is.na( value) ) %>%
     mutate(
-      value = ( value + lag(value))/2
-    ) %>%
-    filter( complete.cases(.) )
-  
+      value = ( value + lag(value))/2 ,
+      date = date %>% ymd
+    )
+      
+# convert to ts object 
+       
 # Example ggsdc  ####
-  gseas = ggsdc(sample2, aes(x = date, y = value ),
+  gseas = ggsdc( data = sample3 , aes(x = index, y = y ),
           method = "decompose", 
-          start = c( min( year( sample2$date ) ), min( month( sample2$date ) ) ) ,
+          # start = c( min( year( sample2$date ) ), min( month( sample2$date ) ) ) ,
           frequency = 12, s.window = 12, type = "multiplicative" ) +
       geom_line() +
       # stat_rollapplyr(width = 12, FUN = mean, color = 'red') +
@@ -202,7 +210,7 @@ ggRemainder = function( data , method = "stl" ){
   d =  ts( data[,-1], frequency = 12 , start = start )
   # glimpse(d)
   
-  dec = seas( d , regression.aictest = NULL )
+  dec = seas( d , regression.aictest = NULL, transform.function = "log")
   
   # outputs
   # plot( dec )
@@ -323,16 +331,16 @@ ggdf = function( df, orgUnit = "" ){
     facet_grid( series ~ . , scales = 'free') +
     ggtitle("Seas") 
   
-  gridExtra::grid.arrange( a, b , heights = c(1,3)) 
+  gridExtra::grid.arrange( a, b , heights = c(2,3)) 
 } 
 
-df = seasonalDF( data = sample2 , method = "seas") #seasonal
+df = seasonalDF( data = sample , method = "seas") #seasonal
 ggdf(df)
 
-df = seasonalDF( sample2 , method = "decompose" ) #decompose
+df = seasonalDF( sample , method = "decompose" ) #decompose
 ggdf(df)
 
-df = seasonalDF( sample2 , method = "stl" ) #STL
+df = seasonalDF( sample , method = "stl" ) #STL
 ggdf(df)
 
 # distribution of noise
@@ -381,7 +389,7 @@ map( index, ~ggdf_u( listing, row = .x ) )
     filter( !is.na( value) ) %>%
     nest( -district ) %>%
     mutate(  
-      plots = map( data , ggRemainder ) ,
+      # plots = map( data , ggRemainder ) ,
       ts.m =  map( data ,  tots_log )  , # .m refers for mulitplicative models
       decomp.m = map( ts.m, deco.m ) ,
       plots.m = map( decomp.m, plot ) 
@@ -428,13 +436,6 @@ map( index, ~ggdf_u( listing, row = .x ) )
   all.annuals = map( seq_len(nrow(undoing)) , ~annuals( undoing[.x, ] ) )
   undoing$annuals = all.annuals
   
-  # annuals( undoing[1, ] )
-  
-  annual.mean.ms = map_dbl( seq_len(nrow(undoing)) , ~annual.mean.m( undoing[.x, ] ) )
-  undoing$annual.mean.m = annual.mean.ms
-  
-  annual.sd.ms = map_dbl( seq_len(nrow(undoing)) , ~annual.sd.m( undoing[.x, ] ) )
-  undoing$annual.sd.m = annual.sd.ms
   
   # Forest plot of annual mean remainder
   ggplot( unnest( undoing, annuals ) , aes( x = year )) +

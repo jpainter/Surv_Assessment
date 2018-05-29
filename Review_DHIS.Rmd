@@ -5,7 +5,7 @@ output: html_document
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Sierra Leone Demo
+  dhis_instance: Kenya
   data_directory:  
   output_directory: ./ # bug: only uses current directory
   output_format: html_document
@@ -116,7 +116,7 @@ This script creates the review documents
                              ) 
     if ( !file.exists( output.filename ) | params$create_new ) { 
 
-        render('Metadata_Review.Rmd',
+        render('Review_Metadata.Rmd',
            output_file = output.filename ,
            output_format = output_format ,
            # 'knitrBootstrap::bootstrap_document' ,
@@ -170,7 +170,7 @@ This script creates the review documents
 
      if ( !file.exists( output.filename ) | params$create_new ) { 
 
-        render('Data_Review.Rmd',
+        render('Review_Data.Rmd',
            output_file = output.filename ,
            output_format = output_format ,
            # 'knitrBootstrap::bootstrap_document' ,
@@ -198,7 +198,7 @@ This script creates the review documents
 
      if ( !file.exists( output.filename ) | params$create_new ) { 
 
-        render('DQ_Trends.Rmd',
+        render('Review_Trends.Rmd',
            output_file = output.filename ,
            output_format = output_format ,
            # 'knitrBootstrap::bootstrap_document' ,

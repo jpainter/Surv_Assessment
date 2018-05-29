@@ -1,4 +1,5 @@
 ---
+title: DHIS2 Metadata
 output:
   html_document:
     css: custom.css
@@ -16,14 +17,14 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Malawi
-  data_directory: ../DHIS2
+  dhis_instance: Sierra Leone
+  data_directory: 
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
   echo: FALSE
 ---
 
-<!-- NB:  when changing to country for review, MUST clear cache.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->
+<!-- NB:  If cache = TRUE, MUST clear cache when changing to country for review.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->
 
 # **`r toupper( params$dhis_instance )` Metadata** {.tabset .tabset-fade}
 
@@ -32,7 +33,7 @@ params:
 
 
 # list of required packages
-    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyverse" )
+    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "tidyverse" )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -70,7 +71,7 @@ knitr::opts_chunk$set( echo = params$echo ,
   
   # folder for storing review data
 
-  origin.folder = paste0( ifelse( is.null( data_directory ), "" , 
+  origin.folder = paste0( ifelse( is.null( data_directory ) , "" , 
                                   paste0( data_directory, "/" ) 
                                   ) ,
                           dhis_instance , "/")
@@ -128,6 +129,7 @@ knitr::opts_chunk$set( echo = params$echo ,
 
 
 ## Metadata Structure
+
 ```{r all_meta }
 
   meta_data_file = paste0( origin.folder ,
@@ -167,6 +169,27 @@ knitr::opts_chunk$set( echo = params$echo ,
   # re-order alaphabetically to be easier to browse in View
   md = md[ order( names(md) ) ]
   
+  # Get installed apps
+  apps_data_file = paste0( origin.folder ,
+                           dhis_instance, 
+                           "_apps.rds" ) 
+  
+   if ( !file.exists( apps_data_file) ){
+   
+        origin.login()
+    
+        # url<-paste0(baseurl,"api/appStore") # available apps ins store
+        url<-paste0(baseurl,"api/apps") # installed apps
+          
+        apps = get( url ) 
+          
+        write_rds( apps, apps_data_file )
+    
+  } else {
+      
+       apps = read_rds( apps_data_file )
+  }
+  
   # Retrieve access data 
   date_metadata = file.info( meta_data_file )$ctime 
   
@@ -182,7 +205,7 @@ Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `*
  jsonedit( md )
 ```
 
-## Numbers of each attribute
+## Metadata list
 
 ```{r attribute_numbers }
 
@@ -199,6 +222,28 @@ Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `*
 
 ```
 
+## Metadata viewer
+
+```{r list_metadata}
+
+z = lapply( md , function(x) x = x[[1]] )
+
+listviewer::jsonedit( z )
+```
+
+
+## APPS Installed
+
+```{r apps, warning=FALSE}
+ 
+  if ( length(apps)>0 ){
+     chrs = map_lgl( colnames(apps) , ~is.character( apps[, .x]) )
+    datatable( apps[, chrs ])
+  } else {
+    cat('No installed apps')
+  }
+  
+```
 
 # Organisational Units {.tabset .tabset-fade}
 
@@ -400,11 +445,12 @@ NB  confirm whether all units assigned to category
 
 # Data Elements {.tabset .tabset-fade}
 
+There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help identify relevant elements, we used several searches of the data element names.   
+
 ## Search phrases 
 
-String search for data elements.  Note that when \\<*words*<\\ are surrounded by '\\<', the search is looking for the whole word (with leading and trailing space). 
+```{r de}
 
-```{r search_data_elements}
     de = md$dataElements
     
     # Convert category combo from df to list (ends up with id as character)
@@ -412,8 +458,10 @@ String search for data elements.  Note that when \\<*words*<\\ are surrounded by
     
     # dataElement vars
     # names( de )
-    display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
-                                 'categoryCombo', 'id' )
+
+```
+
+```{r search_data_elements}
     
     mal = quo( grepl( '\\<malaria\\>|palu' , de$name , ignore.case = TRUE ) )
     TB = quo( grepl( '\\<tb\\>' , de$name , ignore.case = TRUE ) )
@@ -431,6 +479,8 @@ String search for data elements.  Note that when \\<*words*<\\ are surrounded by
     deaths = quo( grepl( 'death' , de$name , ignore.case = TRUE ) )
     pop = quo( grepl( 'pop' , de$name , ignore.case = TRUE ) )
     stock = quo( grepl( 'stock|rupture' , de$name , ignore.case = TRUE ) )
+    malaria_stock = quo( grepl( 'stock|rupture' , de$name , ignore.case = TRUE )  &
+         grepl( '\\<RDT\\>|\\<TDR\\>|\\<IPT\\>|\\<ACT\\>|\\<ASAQ\\>|\\<AL\\>|\\<APT\\>|<\\PTI\\>|\\<SP\\>' , de$name , ignore.case = TRUE ) )
     
 # More complicated search for malaria terms
     malaria_terms_whole_words = 'malaria palu PF plasmodium RDT TDR IPT ACT ASAQ AL APT PTI SP slide micro fever fievre' %>%
@@ -454,27 +504,34 @@ String search for data elements.  Note that when \\<*words*<\\ are surrounded by
     )
          
 # Organise all the searches as a list
-    searches = list( mal, malaria_items, TB, HIV, imm, conf, susp, opd, ipd, patients, attendance, anc, deaths, pop , stock )
+    searches = list( mal, malaria_items, TB, HIV, imm, conf, susp, opd, ipd, patients, attendance, anc, deaths, pop , stock, malaria_stock )
     
-    names.searches  = c( 'mal', 'malaria_items', 'TB', 'HIV', 'imm', 'conf', 'susp', 'opd', 'ipd', 'patients', 'attendance', 'anc', 'deaths', 'pop', 'stock' )
+    names.searches  = c( 'mal', 'malaria_items', 'TB', 'HIV', 'imm', 'conf', 'susp', 'opd', 'ipd', 'patients', 'attendance', 'anc', 'deaths', 'pop', 'stock', 'malaria_stock' )
     
 # perform all searches and count number of hits    
     search = 
         map_df( seq_along(searches), 
                 ~data_frame(
                     Search =   names.searches[.x] ,
-                    search_text =  paste( f_rhs( searches[[.x]] ), 
-                                         collapse = " " ) ,
+                    search_text = f_rhs( searches[[.x]] ) %>% deparse ,
                     Count = sum( eval_tidy( searches[[.x]] ) )
     ))
     
-    kable( search , row.names = TRUE)
+    kable( search , row.names = FALSE)
 
 ```
 
+- "malaria_search_terms"" include English and French terms: `r paste( malaria_search_terms )` 
+
+- Note that when \\<*words*<\\ are surrounded by '\\<', the search is looking for the whole word (with leading and trailing space). 
+
 ```{r de.list}
 
-    de.list = function( filter ){   
+
+    display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
+                                 'categoryCombo', 'id' )
+
+    de.list = function( filter, kable = TRUE ){   
     
         filter = eval_tidy( filter )
         
@@ -501,24 +558,88 @@ String search for data elements.  Note that when \\<*words*<\\ are surrounded by
                 by = 'id'
                 )  
             
-        
-        kable(
-            select( de.filter , 
-                    name, Group, zeroIsSignificant, lastUpdated, categoryCombo
-                    ) %>%
-                rename( dataElement = name ) %>%
-                arrange( Group , dataElement), 
-               'html' ,
-            caption = paste("data elements with search term" ) ) %>%
-            kable_styling(bootstrap_options = c("striped", "hover")) 
+        if (kable){ 
+            kable(
+                select( de.filter , 
+                        name, Group, zeroIsSignificant, lastUpdated, categoryCombo
+                        ) %>%
+                    rename( dataElement = name ) %>%
+                    arrange( Group , dataElement), 
+                   'html' ,
+                caption = paste("data elements with search term" ) ) %>%
+                kable_styling(bootstrap_options = c("striped", "hover")) 
+        } else {
+            datatable( select( de.filter , 
+                        name, Group, zeroIsSignificant, lastUpdated, categoryCombo
+                        ) %>%
+                    rename( dataElement = name ) %>%
+                    arrange( Group , dataElement) ,
+                filter = 'top')
+        }
     }
     
+```
+
+## Groups
+
+
+```{r}
+
+    deg = md$dataElementGroups 
+
+
+    de.deg =  de[  , display.vars ]  %>%           
+        # dataElementGroups
+        left_join( 
+                md$dataElementGroups %>% 
+                    select( name, dataElements) %>%
+                    rename( Group = name ) %>% 
+                    unnest ,
+                by = 'id'
+                )  %>%
+    count(  Group ) %>%
+    rename( `no. dataElements` = n)
+    
+    datatable( de.deg, filter = 'top')
+    
+    # datatable( select( deg , 
+    #                    name, Group, zeroIsSignificant, lastUpdated, categoryCombo
+    #                     ) %>%
+    #                rename( dataElement = name ) %>%
+    #                arrange( Group , dataElement) ,
+    #            filter = 'top')
+            
+    # de.list( filter = TRUE , kable = FALSE)
+```
+
+## Malaria-Groups
+
+
+```{r}
+
+deg.mal = md$dataElementGroups %>% 
+                    select( name, dataElements) %>%
+                    filter( grepl( "malaria|palu", md$dataElementGroups$name ,  ignore.case = TRUE ) ) %>%
+                    rename( Group = name ) %>% 
+                    unnest 
+
+
+if (nrow(deg.mal)>0 ){
+    de.deg =  de[  , display.vars ]  %>%           
+        # dataElementGroups
+        inner_join( deg.mal , by = 'id' ) 
+
+    datatable( de.deg, filter = 'top')
+
+} else { print("There are no data element groups with 'malaria' (or 'palu') in the name")}
+            
+    # de.list( filter = TRUE , kable = FALSE)
 ```
 
 ## Malaria
 
 ```{r}
-    de.list( mal )
+    de.list( mal , kable = FALSE )
 ```
 
 ## Malaria related terms
@@ -561,7 +682,7 @@ String search for data elements.  Note that when \\<*words*<\\ are surrounded by
 ## Stocks
 
 ```{r}
-    de.list( stock )
+    de.list( stock , kable = FALSE )
 ```
 
 
@@ -576,13 +697,6 @@ String search for data elements.  Note that when \\<*words*<\\ are surrounded by
 ```{r}
     de.list( pop )
 ```
-
-## Groups
-
-TODO: Inspect organization of data Element groups?  Which var are assigned to groups?  Are elements assigned to more than one group? 
-
-- Look at other dataElements in the group to see if missing something.
-
 
 
 
@@ -710,10 +824,11 @@ d = dsde %>%
             dataElement = dataElement.name,
             dataSet = dataSet.name ) %>%
     mutate(
-        Malaria =  grepl( 'malaria' , dataElement , ignore.case = TRUE ) ,
+        Malaria =  grepl( 'malaria|palu' , dataElement , ignore.case = TRUE ) ,
         Malaria.conf = Malaria & grepl( 'conf' , dataElement, ignore.case = TRUE) ,
         Malaria.susp = Malaria & grepl( 'susp' , dataElement, ignore.case = TRUE) ,
         patients = grepl( 'patient' , dataElement , ignore.case = TRUE ) ,
+        stock = grepl( 'stock' , dataElement , ignore.case = TRUE ) ,
         dataSet = factor( dataSet ), 
         aggregationType = factor( aggregationType ) ,
         valueType = factor( valueType ) ,
@@ -969,7 +1084,8 @@ datatable(c)
 NB: Future versions should aspire to having a more elegant interface for selecting variables.
 
 ```{r select_data_elements}
-    
+  
+
     de.review.xlsx = paste0( output_directory , "/" ,
                              dhis_instance , "/" ,
                              dhis_instance , "_" , 
@@ -1021,6 +1137,31 @@ NB: Future versions should aspire to having a more elegant interface for selecti
 ```
 
 # Indicators  {.tabset .tabset-fade} 
+
+
+```{r indicators}
+
+indicators = md$indicators
+
+malaria_terms = 'malaria palu RDT TDR IPT ACT ASAQ AL APT PTI SP slide fever fiev'
+
+malaria_search_terms = unlist(stri_extract_all_words(malaria_terms))
+
+# add '\\<' so that only whole word is found
+malaria_search_terms_words = paste0( '\\<', malaria_search_terms, '\\>')
+
+mal_indicators = grepl( paste(malaria_search_terms, collapse = '|'), indicators$displayName )
+
+mal_indicators_n = sum( mal_indicators )
+
+```
+
+## There are `r nrow(indicators)` indicators.  Of these, `r mal_indicators_n` have a malaria seach term that includes: `r paste( malaria_terms) `.
+
+```{r}
+ datatable( indicators, filter = 'top' )
+```
+
 
 <!-- TODO : definitions for indicators  -->
 

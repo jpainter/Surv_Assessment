@@ -331,8 +331,27 @@ get = function( source_url , ...){
      #     
      # }
      
-     # Set list of elements to ask for
-     dataElements = de.vars %>% .$dataElement
+     ##### Assumes metatdata file, md, is already loaded  
+     
+     
+     ##### Set list of elements to ask for
+     # if not vars selected, get list from last data totals
+     if ( nrow( de.vars ) == 0 ){
+         # if it exists, get list of data elements from totals file
+         if ( file.exists( data.totals.file ) ){
+             
+             dataElements = readRDS( data.totals.file ) %>% 
+                 count( dataElement ) %>%
+                 inner_join( md$dataElements %>% select(id, name) ,
+                             by = c("dataElement" = "id") ) %>%
+                 .$name
+
+            } else { return }
+
+     } else {
+         
+         dataElements = de.vars %>% .$dataElement
+     }
        
      
      if ( submissions ){ # substitute dataSet associated with dataElement

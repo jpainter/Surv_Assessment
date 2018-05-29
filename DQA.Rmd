@@ -1,21 +1,21 @@
 ---
 title: "DQA"
 output: 
-    beamer_presentation: default
+    # beamer_presentation: default
+    slidy_presentation: default
     # revealjs::revealjs_presentation:
     #     text-align: left
     #     transition: none
     #     reveal_options:
     #       slideNumber: true
     #       previewLinks: true
-    html_document:
-        css: custom.css
-        toc: true
-        toc_float: true
-        fig_caption: true
-        self_contained: true
+    # html_document:
+    #     css: custom.css
+    #     toc: true
+    #     toc_float: true
+    #     fig_caption: true
+    #     self_contained: true
 ---
-<!-- .reveal .slide: style="text-align: left;"> -->
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
@@ -26,7 +26,7 @@ knitr::opts_chunk$set(echo = FALSE)
 
 Disease surveillance data is available to guide malaria programs, but substantial gaps exist between having data and using the data.  
 
-Many surveillance evaluation tools, but none are malaria specific, or DHIS2 specific.  
+Many surveillance evaluation tools exist, but none are malaria specific, or DHIS2 specific.  
 
 ## Essential goals of malaria surveillace
 

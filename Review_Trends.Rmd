@@ -414,7 +414,13 @@ continuous = function( data = submission , months = 24 ){
 
 ```{r chart_continous }
 
-  most_continuous_elements = unique( d$dataElement[1:8] )
+
+  most_continuous_elements = d %>% 
+    filter( `4` >= 100 ) %>%
+    arrange(-`4`) %>% 
+    distinct( dataElement ) %>%
+    # filter( row_number() < 6 ) %>%
+    .$dataElement
 
   c = map_df( c(1, 6, 12, 24, 36, 48 ), ~continuous( data_totals, .x )  %>%
                      mutate( months = .x ) %>%
@@ -454,9 +460,9 @@ continuous = function( data = submission , months = 24 ){
                 labeller = label_wrap_gen(width = 25, multi_line = TRUE) 
                 ) 
     
-    g
+    # g
     
-    # plotly::ggplotly( g )
+    plotly::ggplotly( g )
 ```
 
 ## Outliers 
@@ -467,9 +473,11 @@ library( plotly )
 # glimpse(data_details)
 
 d = data_details %>% 
+    # name data element
     left_join( md$dataElements %>% select( id, name ) ,  by = c("dataElement" = "id" ) ) %>% 
     # filter( name %in% "NMCP OPD Confirmed Malaria Cases Through RDT") %>%
     filter( name %in% "NMCP OPD Suspected Malaria Cases Tested For Malaria Through RDT") %>%
+    # to account for missing values, include all permutations
     right_join( 
                 expand( . , dataElement, categoryOptionCombo, orgUnit ) ,
                 by = c("dataElement", "orgUnit", "categoryOptionCombo") 
@@ -478,20 +486,40 @@ d = data_details %>%
     # arrange( dataElement, categoryOptionCombo, orgUnit , period ) %>%
     mutate( 
             year = substr( period, 0, 4 ) ,
+            month = substr( period, 5, 6 ) ,
             value = as.integer( value ) ,
             previous = as.integer( lag( value, 12 ) )
             ) %>%
     ungroup %>% 
     mutate( 
             change =  ifelse( previous == 0 | is.na( previous ) , NA, abs( (value - previous) ) ) ,
-            logChange = ifelse( change==0, 0, round( log10(change / previous), 1 ) )
+            logChange = ifelse( change==0, 0, round( log10( change / previous), 1 ) )
             ) %>%
-    select( name, categoryOptionCombo,  year, period, orgUnit , previous, value,
+    select( name, categoryOptionCombo,  year, month, period, orgUnit , previous, value,
             change , logChange )
 
 # Add totals for each month to compare influence
-d.period = d %>%
-    inn
+mean.monthly = data_details %>% 
+    # name data element
+    left_join( md$dataElements %>% select( id, name ) ,  by = c("dataElement" = "id" ) ) %>% 
+    # filter( name %in% "NMCP OPD Confirmed Malaria Cases Through RDT") %>%
+    filter( name %in% "NMCP OPD Suspected Malaria Cases Tested For Malaria Through RDT") %>%
+    # to account for missing values, include all permutations
+    right_join( 
+                expand( . , dataElement, categoryOptionCombo, orgUnit ) ,
+                by = c("dataElement", "orgUnit", "categoryOptionCombo") 
+                ) %>%
+    group_by( dataElement, categoryOptionCombo, orgUnit ) %>%
+    # arrange( dataElement, categoryOptionCombo, orgUnit , period ) %>%
+    mutate( 
+            year = substr( period, 0, 4 ) ,
+            month = substr( period, 5, 6 ) ,
+            value = as.integer( value ) ,
+            previous = as.integer( lag( value, 12 ) )
+            ) %>%
+    group_by( orgUnit, month, name, categoryOptionCombo ) %>%
+    summarise( mean.value = mean( value , na.rm =  TRUE ))
+
 
 # sort by most influential--largest absolute change
 datatable( d %>% 
@@ -518,7 +546,7 @@ datatable( d %>%
 ```
 
 
-## Trends 
+# Trends 
 
 Compare trends among clinics reporting consistently for the last **48 months** with all the other clinics, many of which started reporting more recently. 
 
@@ -628,7 +656,7 @@ if (nrow(d)> 0 ){
         scale_y_continuous( labels = scales::comma )
     
     
-    grid.arrange( total.trend , select.trend,  ncol=2 )
+    grid.arrange( total.trend , select.trend,  ncol=1 )
 
 } else { 
     cat("No data to evaluate")

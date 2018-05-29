@@ -10,7 +10,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Malawi
+  dhis_instance: Uganda
   data_directory:  
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -223,7 +223,6 @@ feature_type = function( coordinate ){
   levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
   
 ```
-
 
 
 # Data elements {.tabset .tabset-fade}
