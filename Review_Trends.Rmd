@@ -10,7 +10,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Malawi
+  dhis_instance: Tanzania
   data_directory:  .
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -240,7 +240,17 @@ login_origin = function(){
   # data frame of datasets (ds) and data elements (de)
   dsde = map_df( 1:length(md$dataSets$dataSetElements), 
             ~map_df( md$dataSets$dataSetElements[[.x]], 
-                     ~as.matrix(.x) )) 
+                     ~as.matrix(.x) ))
+
+# For versions <2.6, need to add categoryCombo
+    if ( !'categoryCombo' %in% names(dsde) ){
+      categoryCombos =  data_frame(
+          dataSet = md$dataSets$id ,
+          categoryCombo = md$dataSets$categoryCombo$id )
+      
+      dsde = dsde %>% inner_join( categoryCombos,  by = "dataSet")
+    }
+
 
   # some instances have extra columns (see DRC), and need to remove 'id'
   if ( 'id' %in% colnames(dsde) ) dsde = dsde %>% select(-id)
@@ -460,9 +470,9 @@ continuous = function( data = submission , months = 24 ){
                 labeller = label_wrap_gen(width = 25, multi_line = TRUE) 
                 ) 
     
-    # g
+    g
     
-    plotly::ggplotly( g )
+    # plotly::ggplotly( g )
 ```
 
 ## Outliers 
@@ -476,7 +486,7 @@ d = data_details %>%
     # name data element
     left_join( md$dataElements %>% select( id, name ) ,  by = c("dataElement" = "id" ) ) %>% 
     # filter( name %in% "NMCP OPD Confirmed Malaria Cases Through RDT") %>%
-    filter( name %in% "NMCP OPD Suspected Malaria Cases Tested For Malaria Through RDT") %>%
+    # filter( name %in% "NMCP OPD Suspected Malaria Cases Tested For Malaria Through RDT") %>%
     # to account for missing values, include all permutations
     right_join( 
                 expand( . , dataElement, categoryOptionCombo, orgUnit ) ,
@@ -503,7 +513,7 @@ mean.monthly = data_details %>%
     # name data element
     left_join( md$dataElements %>% select( id, name ) ,  by = c("dataElement" = "id" ) ) %>% 
     # filter( name %in% "NMCP OPD Confirmed Malaria Cases Through RDT") %>%
-    filter( name %in% "NMCP OPD Suspected Malaria Cases Tested For Malaria Through RDT") %>%
+    # filter( name %in% "NMCP OPD Suspected Malaria Cases Tested For Malaria Through RDT") %>%
     # to account for missing values, include all permutations
     right_join( 
                 expand( . , dataElement, categoryOptionCombo, orgUnit ) ,
@@ -539,7 +549,8 @@ datatable( d %>%
                  ) +
     ggtitle("Greater than 10-fold change in 12-months")
 
- ggplotly( g )
+ g
+ # ggplotly( g )
     
 
 

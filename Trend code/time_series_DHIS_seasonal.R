@@ -114,7 +114,7 @@ library( lubridate )
 # convert to ts object 
        
 # Example ggsdc  ####
-  gseas = ggsdc( data = sample3 , aes(x = index, y = y ),
+  gseas = ggsdc( data = sample2 , aes(x = index, y = y ),
           method = "decompose", 
           # start = c( min( year( sample2$date ) ), min( month( sample2$date ) ) ) ,
           frequency = 12, s.window = 12, type = "multiplicative" ) +

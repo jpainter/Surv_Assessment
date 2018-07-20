@@ -37,8 +37,7 @@ get = function( source_url , ...){
     
     url<-paste0( baseurl, "api/metadata.json" )
     met = get( url ) 
-    
-    
+
     }
    
   

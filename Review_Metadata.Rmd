@@ -17,7 +17,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Sierra Leone
+  dhis_instance: Tanzania 
   data_directory: 
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -33,7 +33,8 @@ params:
 
 
 # list of required packages
-    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "tidyverse" )
+    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet",
+                     "geojsonR", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "tidyverse", "readxl" )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -146,18 +147,41 @@ knitr::opts_chunk$set( echo = params$echo ,
     md = get( url ) 
     # View( md )
     
-    
     # Alternative when API call returns error..
-    # url <- paste0( baseurl, "api/schemas.json" )
-
-    # schema =  fromJSON( suppressMessages(
-    #     content( GET( url ), "text") ) 
-    # )
-    # 
-    # x = get("https://sl.dhis2.org/hmis/api/metadata/version" )
-    # x
+    if ( names(md[1]) == "httpStatus" ){ 
+        
+        url = paste0( baseurl, "api" )
+        resources = get( url )[['resources']]
+        # View(resources)
+        n_resources = nrow( resources )
+        
+        get_resource_as_list = function( i ){
+            
+            print( paste( i , resources$plural[i] ) ) 
+            
+            # named list
+            url <- paste0(resources$href[i] , ".json?fields=:all&paging=false" )
+        
+            schema =  try( get( url ) , silent = TRUE )
+            
+            # NB: update so that tries up to 3 times...
+            
+            if ( !is.list( schema ) | schema[3]  %in% "ERROR"){
+                 return( data.frame( id = NA ) ) # exit if not a list
+            }
+            
+            s =  schema[[1]] 
+            # View( s )
+            return(s)
+        }
+        
+        # get_resource_as_list(i)
     
-
+        md = map(1:n_resources, get_resource_as_list )
+        names( md ) = map_chr( 1:n_resources , ~resources$plural[.x] )
+        md = md[order(names(md))] #order alphebetically
+        # View( md )
+    }
     
     write_rds( md, meta_data_file )
     
@@ -222,9 +246,9 @@ Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `*
 
 ```
 
-## Metadata viewer
+<!-- ## Metadata viewer -->
 
-```{r list_metadata}
+```{r list_metadata, eval=FALSE}
 
 z = lapply( md , function(x) x = x[[1]] )
 
@@ -246,6 +270,9 @@ listviewer::jsonedit( z )
 ```
 
 # Organisational Units {.tabset .tabset-fade}
+
+There are `r  md$organisationUnits %>% nrow %>% comma()` organisation units in `r  md$organisationUnitLevels %>% nrow` levels. Of these, `r sum( map_lgl( md$organisationUnits$attributeValues , ~length(.x) > 0 ) )` are assigned an attribute.  
+
 
 ## Organizational Units and levels
 
@@ -284,7 +311,7 @@ feature_type = function( coordinate ){
   
    ous =  md$organisationUnits %>% 
         select( id, path, name, shortName, coordinates , 
-                created, lastUpdated, ends_with('Date') 
+                created, lastUpdated , ends_with('Date') 
                 ) %>% as.tibble %>%
        rename( ous = name ) %>%
         mutate( 
@@ -297,7 +324,7 @@ feature_type = function( coordinate ){
        inner_join( md$organisationUnits %>% select( id, name ) ,
                    by = c('parent.id' = 'id' ) ) %>%
        rename( parent = name )
-    
+   
 
   table_ou_levels =   count( ous, level ) %>%
       # left_join( select( md$organisationUnitLevel, offlineLevels, name) ,
@@ -316,13 +343,13 @@ feature_type = function( coordinate ){
                             ousFeatures, by = 'level' ) %>%
       mutate( n = comma(n) ) 
     
-  kable( feature_table, align = c( 'l', 'l', 'r' ) ) 
+  kable( feature_table, align = c( 'l', 'l', 'r' ) ,
+         'html' ,
+                caption = paste("Organisational Unit Levels" ) ) %>%
+                kable_styling(bootstrap_options = c("striped", "hover")
+                              ) 
 
 ```
-
-
-There are, `r sum( map_lgl( md$organisationUnits$attributeValues , ~length(.x) > 0 ) )` attribute values assigned to OU.  
-
 
 ## OU Levels
 
@@ -351,26 +378,177 @@ NB : stratify by attributes such as private, public--if available
 
  # count(ous, nchar( openingDate)>0 ) # all have
 
- table( year( ymd_hms( ous$openingDate )) ) %>% addmargins(.) # but some are recent
+ t = table( year( ymd_hms( ous$openingDate )) ) %>% addmargins(.) # but some are recent
+
+  kable( t, 
+         'html' ,
+                caption = paste("Organisational Units By Year" ) ) %>%
+                kable_styling(bootstrap_options = c("striped", "hover")
+                              ) 
+
 
 ```
 
-- Are names repeated? 
+## Map: Health facilities with number of confirmed malaria cases 
 
-```{r ous_repeat_names }
- # are names repeated? 
-  print( paste(
-      ifelse( (n_distinct( ous$ous ) < n_distinct( ous$id ) ) == TRUE, "Some", "No") ,
-      "names are repeated with different ids. Will need to exmaine data entry to rule/out double counting from these OU." )
-  )
-  
-  if (n_distinct( ous$ous ) < n_distinct( ous$id ) ){
-      
-      # Same name in different districts?
-      ous %>% count( level, parent, ous ) %>% arrange(-n) %>% filter(n>1)
-  }
+
+```{r}
+# orgUnits that are points (likely HF), and open
+clinics = md$organisationUnits %>% 
+    select( id, name, coordinates, openingDate, closedDate, path  ) %>%
+    as.tibble %>% 
+    mutate( 
+        feature_type = map_chr( coordinates, ~feature_type(.x) ) ,
+        # remove quotation marks
+        coordinates = gsub('"', '', coordinates)
+        ) %>%
+    filter( feature_type %in% 'Point' ) %>%
+    separate( coordinates, c('long', 'lat'), sep = ',', remove = FALSE ) %>% 
+    filter( !is.na(long), !is.na(lat), is.na( closedDate ) ) %>%
+    mutate(
+        long = as.numeric(  substr(  long, 2, nchar(long) ) ) ,
+        lat =  as.numeric(  substr(  lat, 1, nchar(lat)-1 )  ) ,
+        level = map_int( path,
+                         ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+            ) ,
+        Year = year( ymd_hms( openingDate ) )  %>% ifelse( .<2014, 2014, .) 
+    ) 
+
+# orgUnits that are polygons (likely admin), and open
+admins = md$organisationUnits %>% 
+    select( id, name, coordinates, openingDate, closedDate, path  ) %>%
+    as.tibble %>% 
+    mutate( 
+        feature_type = map_chr( coordinates, ~feature_type(.x) ) ,
+        # remove quotation marks
+        coordinates = gsub('"', '', coordinates)
+        ) %>%
+    filter( feature_type %in% 'Polygon'  ) %>%
+    filter( !is.na(coordinates), is.na( closedDate ) ) %>%
+    mutate(
+        str_js = paste( '{ "type": "MultiPolygon", "coordinates": ' , 
+                coordinates , ' }' ) ,
+        
+        char_js = map( str_js , ~FROM_GeoJson(url_file_string = .x ) )
+    )
+
+# NB TODO: Give message for coordinates missing lat long
+```
+
+```{r}
+
+    # pal = colorNumeric('OrRd', d$value.scale )
+    binpal <- colorBin( c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00'), 
+                        clinics$Year , 2014:2018 )
+
+    factpal <- colorFactor( c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00'),  clinics$Year, reverse = TRUE )
+
+ leaflet( clinics ) %>% 
+        addTiles(  urlTemplate = 
+                       "http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                   )  %>%
+        # addGeoJSON(geojson = admins$coordinates,  color = "red",fill = "red") %>%
+        addCircles( 
+            ~long, ~lat, 
+            radius =  ~level ,
+            weight =  5 ,
+            label = ~paste( name , "(level:", level, ")", "Year:", Year )  ,
+            labelOptions = labelOptions(noHide = FALSE, textOnly = TRUE, textsize = "14px") ,
+            popup = ~paste( name , "(level:", level, ")", "Year:", Year )  ,
+            color = ~factpal(Year)  , opacity = .7 ,
+            fillColor = ~factpal(Year) , fillOpacity = .75
+        ) %>%
+        addScaleBar() %>%
+        # addLegend(pal = factpal, values = ~level , opacity = 1 ) %>%
+        addLegend(pal = factpal, values = ~Year, opacity = 1 )
+ 
 
 ```
+
+```{r, eval=FALSE}
+# 2017 data
+    data.2017 = data %>%
+        filter( orgUnit %in% clinics$id ) %>% 
+        mutate( year = substr( period , 1, 4 )  )  %>%
+        filter( year %in% 2017 ) %>%
+        group_by( year ,  orgUnit, dataElement ) %>%
+        summarise( value = sum( as.double(value) ) ) %>%
+        left_join( select( md$organisationUnits , id , name  , path) %>%
+                       mutate( level = map_int( path,
+                                                ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+                       ) ),
+                   by = c("orgUnit" = 'id' )
+                   ) %>%
+        ungroup %>%
+        rename( HF = name, id = dataElement ) %>%
+        left_join( select( md$dataElements, id, name ) ,
+                   by = c( 'id' ))  %>%
+        rename( dataElement = name ) %>%
+        select( year , level, HF, dataElement, value ) 
+    
+# numbers of HF submitting data (note, does not reflect number of months.  could be 1 or 12)
+    # count(data.2017, level, dataElement)
+```
+
+```{r, fig.width= 8, fig.height=10, eval=FALSE }
+
+# select data.element to show by finding most frequent
+de_freq = data  %>%
+    mutate( year = substr( period, 1, 4 )) %>%
+    inner_join( select( md$dataElements, id, name  ) , 
+                by = c('dataElement'='id' )) %>%
+    count( year, name ) %>%
+    arrange( desc(year), desc(n) ) 
+
+de_most_freq = de_freq[1, ]
+
+
+d = left_join( clinics , 
+                  filter( data.2017, 
+                          dataElement %in% de_most_freq 
+                          # value > 0 
+                          ) %>%
+                      select( year, HF, value ),  
+                  by = c('name' = 'HF') 
+                              ) %>%
+                mutate( 
+                    value = ifelse( is.na( value ), 0 , value ) ,
+                    value.scale = ifelse( !is.na(value) & value>0 , 
+                                                    1 + log(1 + value/ mean(value, na.rm = TRUE) ) , 
+                                                 2 ) 
+                        ) %>%
+    filter( abs(long) <= 180 , abs(lat) <= 180 )
+
+ # NB: add test to see if coords within country; if not, try reversing
+
+
+    pal = colorNumeric('OrRd', d$value.scale )
+    binpal <- colorBin("plasma", d$value , 5, pretty = TRUE)
+    factpal <- colorFactor( brewer_pal("qual", 2)(7),  d$level)
+
+ leaflet( d ) %>% 
+        addTiles(  urlTemplate = 
+                       "http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                   )  %>%
+        addCircles( 
+            ~long, ~lat, 
+            radius =  500 ,
+            weight =  ~value.scale ,
+            label = ~paste( name , "(level:", level, ")" , comma( value ) )   ,
+            labelOptions = labelOptions(noHide = FALSE, textOnly = TRUE, textsize = "14px") ,
+            popup = ~paste( name , "(level:", level, ")" , comma( value ) ) , 
+            color = ~binpal(value)  , opacity = 1 ,
+            fillColor = ~binpal(value) , fillOpacity = .6
+        ) %>%
+        addScaleBar() %>%
+        # addLegend(pal = factpal, values = ~level , opacity = 1 ) %>%
+        addLegend(pal = binpal, values = ~value, opacity = 1 ) 
+ 
+
+```
+
+
+## Numbers of orgUnits by level, by year
 
 
 ```{r ous_charts_by_level}
@@ -379,6 +557,17 @@ NB : stratify by attributes such as private, public--if available
   p = strsplit( periods , ";" , fixed = TRUE )[[1]]
   p = paste0( p , "01")
   p = ymd( p )
+  
+  # Get parent string form path
+  parent_string = function( path ){
+    o = strsplit( path, split='[/]') %>% unlist
+    o = o[ c(-1, -length(o)) ]
+
+    parent_string = paste( o, collapse  = "/")
+    return( parent_string )
+  }
+  
+  
   
   # number of units per level 
    n.level = list()
@@ -415,14 +604,15 @@ NB : stratify by attributes such as private, public--if available
           by = 'level' ) %>%
     mutate( 
         name = fct_reorder( name, level )
-        )
+        ) %>%
+     filter( )
 
 # convert month-Yr to dat
   d$date = fast_strptime( as.character(  d$period ) , "%Y%m") %>% as.POSIXct
   
   ggplot( d,  aes(x = date, y = n, group = level )) + 
       geom_line() +
-      facet_wrap( ~name , scales = 'free' )
+      facet_wrap( level~name , scales = 'free' )
   
   
   ###NB Join wiht ou levels for labels
@@ -430,6 +620,25 @@ NB : stratify by attributes such as private, public--if available
 ```
 
 NB: not all ou will be assigned to a dataset, and some may be duplicates...
+
+## Are names repeated? 
+
+```{r ous_repeat_names }
+ # are names repeated? 
+  print( paste(
+      ifelse( (n_distinct( ous$ous ) < n_distinct( ous$id ) ) == TRUE, "Some", "No") ,
+      "names are repeated with different ids. Will need to exmaine data entry to rule/out double counting from these OU." )
+  )
+  
+  if (n_distinct( ous$ous ) < n_distinct( ous$id ) ){
+      
+      # Same name in different districts?
+      ous %>% count( level, parent, ous ) %>% arrange(-n) %>% filter(n>1)
+  }
+
+```
+
+
 ## OU unit groups and group sets ?   
 
   - private / public
@@ -702,29 +911,27 @@ if (nrow(deg.mal)>0 ){
 
 # Categories
 
-How many **categories** are there?
+How many **categories** are there? `r length( md$categories$id ) `
 
-```{r}
+```{r }
     md$categories %>% select( id , name ) %>%
-    walk( print( paste( "There are" , length(md$categories$id ) , 
-                 "categories.") 
-                 )
-          ) %>% 
+    # walk( print( paste( "There are" , length(md$categories$id ) , 
+                 # "categories.") 
+                 # )
+          # ) %>% 
     datatable
 ```
 
 How many **category combos** are there?
-
-```{r}
-    md$categoryCombos %>% select( id , name ) %>%
-    walk( print( paste( "There are" , nrow(.)  , 
+`r paste( "There are" , nrow( md$categoryCombos) %>% comma , 
                  "category combos, with", 
                  md$categoryCombos$categories %>% 
                      unlist %>% 
                      n_distinct( ),
-                 "categories.")
-                 )
-          ) 
+                 "categories.") `
+
+```{r}
+    # md$categoryCombos %>% select( id , name ) 
 
     cc = data_frame(
         categoryCombo.id = md$categoryCombos$id ,
@@ -746,48 +953,67 @@ How many **category combos** are there?
         datatable
 ```
 
-How many **category options** are there?
+How many **category options** are there? 
+`r  paste( "There are" , nrow( md$categoryOptions) %>% comma, "category options."   )`
 
 ```{r}
-    md$categoryOptions %>% select( id , name ) %>%
-    walk( print( paste( "There are" , nrow(.) , 
-                 "category options."  
-                ) 
-                 )
-          ) %>% 
+    md$categoryOptions %>% select( id , name ) %>% 
+    # walk( print( paste( "There are" , nrow(.) , 
+    #              "category options."  
+    #             ) 
+    #              )
+    #       ) %>% 
     datatable
 ```
 
 Of these, how many category options are used in the category  option combos?
+`r paste( "There are" , md$categoryOptionCombos$categoryOptions %>% 
+    unlist %>% 
+    n_distinct( ) %>% comma , 
+                 "category options used in category option combos.") `
 
 ```{r}
 
-    md$categoryOptionCombos$categoryOptions %>% 
-    unlist %>% 
-    n_distinct( ) %>%
-    walk( print( paste( "There are" , . , 
-                 "category options used in category option combos.")
-                 )
-          ) 
+    # md$categoryOptionCombos$categoryOptions %>% 
+    # unlist %>% 
+    # n_distinct( )
 
 ```
 
-Are there more than one category associated with a category combo?
+<!-- Are there more than one category associated with a category combo? -->
 
 
 
 # Datasets {.tabset .tabset-fade} 
 
+There are `r  md$dataSets %>% nrow %>% comma()` datasets. Of these, `r sum( map_lgl( md$dataSets$attributeValues , ~length(.x) > 0 ) )` are assigned an attribute.  
+
+
+
 ## All Datasets 
 
 <!-- TODO: show dataset- group- and data elements together -->
 
-```{r datatable_dataElements}
-
+```{r dataset_dataElement_categoryCombos}
   # data frame of datasets and data elements
   dsde = map_df( 1:length(md$dataSets$dataSetElements), 
             ~map_df( md$dataSets$dataSetElements[[.x]], 
                      ~as.matrix(.x) ))
+
+# For versions <2.6, need to add categoryCombo
+    if ( !'categoryCombo' %in% names(dsde) ){
+      categoryCombos =  data_frame(
+          dataSet = md$dataSets$id ,
+          categoryCombo = md$dataSets$categoryCombo$id )
+      
+      dsde = dsde %>% inner_join( categoryCombos,  by = "dataSet")
+    }
+
+
+```
+
+```{r datatable_dataElements}
+
 
 d = dsde %>% 
     # join data elements 
@@ -801,10 +1027,10 @@ d = dsde %>%
                 by = c('dataSet' = 'id' )
                 ) %>%
     rename( dataSet.name = name ) %>%
-    left_join( md$categoryCombos %>% 
-                    select( name, id , categories ) , 
-                by = c('categoryCombo' = 'id' )
-                ) %>%
+        left_join( md$categoryCombos %>%   
+                        select( name, id , categories ) , 
+                    by = c('categoryCombo' = 'id' )
+                    ) %>% 
     rename( categoryCombos = name ) %>%
     mutate(
         # to keep all values, need to convert null to NA; 
@@ -835,8 +1061,10 @@ d = dsde %>%
         domainType = factor( domainType )
     
     ) 
+
+  count( d, dataSet, categoryCombos,  periodType, timelyDays  )  %>% kable
+
     
-     
 # TODO: add in indice of %OU associated with each dataset
 # TODO: add in data Element Groups 
 
@@ -844,22 +1072,12 @@ d = dsde %>%
 
 ```
 
-```{r}
-
-  count( d, dataSet, categoryCombos,  periodType, timelyDays  )  %>%
-    kable
-
-```
-
-
-
 ## All dataElements within all dataSets
 
 
 ```{r display_dataElement_dataSets}
 
-# NB: when datatable options changed, datatable may not render until 'clear Knitr cache' selected 
-
+      
 datatable( d %>%
     select( dataSet, dataElement, Malaria, patients, category, categoryCombos, 
             zeroIsSignificant , aggregationType, valueType , domainType) ,
@@ -893,11 +1111,6 @@ datatable( d %>%
 
 ```{r count_dataset_in_data, comment=""}
 
-  # data frame of datasets and data elements
-  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
-            ~map_df( md$dataSets$dataSetElements[[.x]], 
-                     ~as.matrix(.x) ))
-
     # display with names
     dsde %>%
         left_join( md$dataSets %>% select( id, name ), 
@@ -919,7 +1132,7 @@ datatable( d %>%
                    options= list( pageLength = 15 , 
                                   scrollY = TRUE) 
                    )
-  
+
 ```
 
 ## Reporting Malaria
@@ -1084,7 +1297,7 @@ datatable(c)
 NB: Future versions should aspire to having a more elegant interface for selecting variables.
 
 ```{r select_data_elements}
-  
+ 
 
     de.review.xlsx = paste0( output_directory , "/" ,
                              dhis_instance , "/" ,
@@ -1117,11 +1330,21 @@ NB: Future versions should aspire to having a more elegant interface for selecti
                     unnest ,
                 by = 'id'
                 ) %>%  
+                  
+            # dataSets              
+            left_join(
+                dsde %>% select( dataElement.id, dataElement, dataSet )  %>%
+                    group_by( dataElement.id , dataElement ) %>%
+                    summarise( 
+                        n_dataSets = n_distinct( dataSet ) ,
+                        dataSets = paste( dataSet, collapse = "; ")
+                        )  , by = c('id' = 'dataElement.id')
+                ) %>%
 
-            rename( dataElement = name ) %>%
-            mutate(  Include = NA ) %>%
-            select( Include, dataElement , Group , categoryCombo) %>%
-            arrange( Group, dataElement )
+        mutate(  Include = NA ) %>%
+        select( Include, id, name , dataSets, Group , categoryCombo) %>%
+        rename( dataElement.id = id, dataElement = name ) %>% 
+        arrange( Group, dataSets,  dataElement )
     )
     
     names(l) = names.searches
@@ -1129,8 +1352,7 @@ NB: Future versions should aspire to having a more elegant interface for selecti
  
     # if ( !file.exists( de.review.xlsx ) ){
         
-        openxlsx::write.xlsx( l ,
-                              de.review.xlsx )
+        try( openxlsx::write.xlsx( l , de.review.xlsx ) )
     # } 
     
     
