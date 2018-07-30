@@ -511,3 +511,14 @@ get = function( source_url , ...){
      
      return( d )
  }
+
+ # parse_parent_ous: Get Parent OUS/ path ####
+ # NB: must run with rowwise() or else lower levels return NA (why?)
+ # probably because gregexpr works on whole column so n is always the longest value
+ parse_parent_ous = function( path ){
+     breaks = gregexpr("/", path , perl = TRUE)[[1]]
+     n = length( breaks ) 
+     if ( n == 0 ) return( NA ) 
+     if ( n == 1 ) return( substr( path , breaks[1] + 1 , length(path) ) ) 
+     substr( path , breaks[n-1] + 1 , breaks[n]-1 )
+ }

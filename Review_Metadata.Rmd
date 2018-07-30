@@ -314,6 +314,7 @@ feature_type = function( coordinate ){
                 created, lastUpdated , ends_with('Date') 
                 ) %>% as.tibble %>%
        rename( ous = name ) %>%
+       rowwise() %>%
         mutate( 
           level = map_int( path, 
                                ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
@@ -323,6 +324,7 @@ feature_type = function( coordinate ){
         ) %>%
        inner_join( md$organisationUnits %>% select( id, name ) ,
                    by = c('parent.id' = 'id' ) ) %>%
+       ungroup() %>%
        rename( parent = name )
    
 
