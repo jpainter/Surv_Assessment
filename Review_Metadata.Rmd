@@ -17,7 +17,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Tanzania 
+  dhis_instance: Uganda 
   data_directory: 
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -685,6 +685,9 @@ There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help ident
     patients = quo( grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
          !grepl( '\\<hiv\\>|\\<tb\\>' , de$name , ignore.case = TRUE )
          )
+    fever = quo( grepl( '\\<fever\\>' , de$name , ignore.case = TRUE )  &
+         !grepl( '\\<yellow\\>|\\<typhoid\\>' , de$name , ignore.case = TRUE )
+         )
     attendance = quo( grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE ) )
     anc = quo( grepl( '\\<anc\\>' , de$name , ignore.case = TRUE ) )
     deaths = quo( grepl( 'death' , de$name , ignore.case = TRUE ) )
@@ -700,7 +703,7 @@ There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help ident
         # add '\\<' so that only whole word is found
         sprintf( "\\<%s\\>", . )
     
-    malaria_terms_part_words = 'conf susp' %>% stri_extract_all_words %>% unlist
+    malaria_terms_part_words = NULL  # 'conf susp' %>% stri_extract_all_words %>% unlist
     
     malaria_search_terms = paste(  
         c( malaria_terms_whole_words , 
@@ -711,13 +714,13 @@ There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help ident
     malaria_items = quo( grepl( malaria_search_terms, de$name , 
                       ignore.case = TRUE ) 
                       &
-         !grepl( '\\<hiv\\>|\\<tb\\>|MTCT' , de$name , ignore.case = TRUE )
+         !grepl( '\\<hiv\\>|\\<tb\\>|MTCT|\\<yellow fever\\>|\\<typhoid fever\\>' , de$name , ignore.case = TRUE )
     )
          
 # Organise all the searches as a list
-    searches = list( mal, malaria_items, TB, HIV, imm, conf, susp, opd, ipd, patients, attendance, anc, deaths, pop , stock, malaria_stock )
+    searches = list( mal, malaria_items, TB, HIV, imm, conf, susp, opd, ipd, patients, fever, attendance, anc, deaths, pop , stock, malaria_stock )
     
-    names.searches  = c( 'mal', 'malaria_items', 'TB', 'HIV', 'imm', 'conf', 'susp', 'opd', 'ipd', 'patients', 'attendance', 'anc', 'deaths', 'pop', 'stock', 'malaria_stock' )
+    names.searches  = c( 'mal', 'malaria_items', 'TB', 'HIV', 'imm', 'conf', 'susp', 'opd', 'ipd', 'patients', 'fever', 'attendance', 'anc', 'deaths', 'pop', 'stock', 'malaria_stock' )
     
 # perform all searches and count number of hits    
     search = 
@@ -884,6 +887,14 @@ if (nrow(deg.mal)>0 ){
     de.list( patients )
 ```
 
+## Fever
+
+excluding 'yellow' and 'typhoid'
+
+```{r}
+    de.list( fever )
+```
+
 ## Attendance
 
 ```{r}
@@ -911,7 +922,282 @@ if (nrow(deg.mal)>0 ){
 
 
 
+# Number of facilities are reporting each data element? 
+
+```{r}
+api_last12months_national_data = function( 
+                     periods = "LAST_YEAR" , 
+                     levels = "LEVEL-1" , 
+                     aggregationType = 'COUNT' , 
+                     de.include = de.include ,
+                     file = "" ,
+                     submissions =  FALSE,
+                     details = FALSE
+                     
+){
+    
+        dataElement.ids =  de.include %>% .$id 
+        dataElement.names = de.include %>% .$name
+ 
+    
+    if ( submissions ){ # substitute dataSet associated with dataElement
+        
+        # get datasets associated with data_totals dataElements
+        dataElements =  data_totals %>% 
+            # link datasets
+            inner_join( dsde , by = "dataElement" 
+            ) %>%
+            count( dataSet ) %>% 
+            # convert ids to names
+            rename( id = dataSet ) %>%
+            left_join( md$dataSets %>% select( name, id ), 
+                       by = "id" 
+            ) %>%
+            .$name
+    }
+    
+    # print( baseurl )
+    # print( paste( "details:" , details ) )
+    # print( paste( "submissions:" , submissions ) )
+    
+    data = list()
+        
+        data.de = list()
+        
+        pb <- progress_bar$new(
+            format = " downloading [:bar] :percent eta: :eta",
+            total = nrow( de.include ), 
+            clear = FALSE, width= 60
+            )
+
+        for ( element in  seq_along( dataElement.ids ) ){
+            
+            pb$tick()
+
+                # de.name = paste(
+                #     md$dataElements %>%
+                #         select( id, name ) %>%
+                #         filter( trimws(name) %in% dataElements[ element ] ) %>%
+                #         .$id ,
+                #     collapse  = ";" )
+
+            
+            # print( paste( periods, "Element" , element ,
+                          # "/" , length( dataElement.ids ) ,
+                          # ":" , dataElement.names[ element ] ) 
+            # )
+            
+            data.level = list()
+            for ( level in seq_along( levels ) ){
+                
+                # If no value for level 1, skip other levels
+                if ( level > 1 && !is.data.frame( fetch ) ) next()
+                
+                # print( paste( levels[level] , ifelse( details, "Details", "") ) )
+                
+                #Assemble the URL ( before starting, double check semicolons for dx dimension )
+                url <- paste0( baseurl, 
+                               "api/analytics/dataValueSet.json?" ,
+                               # "api/analytics/dataValueSet.json?" ,
+                               "&dimension=ou:", levels[level] , 
+                               "&dimension=pe:" , periods ,
+                               "&dimension=dx:" , dataElement.ids[ element ] ,
+                               "&displayProperty=NAME",
+                               "&aggregationType=" , aggregationType )
+                
+                # print( url )
+                
+                # Fetch data
+                fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+                
+                # if returns a data frame of values (e.g. not 'server error'), then keep
+                if ( is.data.frame( fetch ) ){ 
+                    
+                    data.level[[ level ]] = fetch %>% 
+                        select( -storedBy, -created, -lastUpdated, -comment )
+                    
+                    # print( paste( periods, ":" , nrow(fetch), "records." ) )
+                    
+                } else {
+                    data.level[[ level ]] = data_frame( 
+                        dataElement = dataElement.ids[ element ] ,
+                        period =  periods ,
+                        orgUnit =  levels[level] ,
+                        value = NA
+                        )
+                    print( "no records" )
+                }
+
+        }
+        
+            data.de[[ element ]] = data.table::rbindlist( data.level, fill = TRUE )
+            
+            print( paste( dataElement.names[ element ]  , "has" , 
+                          scales::comma( nrow( data.de[[ element ]] ) ) , 
+                          "records"  ) ) 
+        
+    }
+    
+        # combine data
+        data = data.table::rbindlist( data.de , fill = TRUE )
+ 
+    return( data )
+}
+```
+
+
+```{r}
+
+  de.mal = de[  eval_tidy( malaria_items) , display.vars ]
+
+  reported_data_file = paste0( origin.folder ,
+                           dhis_instance, 
+                           "_reported.rds" ) 
+
+  if ( !file.exists( reported_data_file) ){
+      
+        library( progress )
+        
+        origin.login()
+        
+        d.reported = api_last12months_national_data( de.include = de.mal )
+        
+
+        saveRDS( d.reported , reported_data_file )
+        
+  } 
+
+
+ if ( file.exists( reported_data_file) ){
+    
+     d.reported =  readRDS( reported_data_file )
+         
+ }
+
+```
+
+
+```{r}
+# data frame of datasets and data elements
+  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
+            ~map_df( md$dataSets$dataSetElements[[.x]], 
+                     ~as.matrix(.x) )) %>%
+    rename( dataElement.id = dataElement , 
+            dataSet.id = dataSet ) %>%
+    left_join( md$dataElements %>% select( id, name ) ,
+               by = c('dataElement.id' = 'id' )) %>%
+    rename( dataElement = name ) %>%
+    left_join( md$dataSets %>% select( id, name ) ,
+               by = c('dataSet.id' = 'id' )) %>%
+    rename( dataSet = name )
+```
+
+
+```{r }
+
+open_ou =     md$organisationUnits %>% 
+    select( id, closedDate) %>%
+    filter( is.na(closedDate) ) %>%
+    select( id )
+
+n_facilities_assigned_to_datasets = md$dataSets %>%
+    select( id, organisationUnits) %>%
+    rename( dataSet.id = id ) %>% 
+    unnest( organisationUnits ) %>%
+    inner_join( open_ou , by = 'id' ) %>%
+    count( dataSet.id ) %>%
+    rename( n_facilities = n )
+    
+# number of options in each catgory combo
+
+options = md$categoryCombos %>% 
+    select( id, categories) %>% 
+    unnest( categories ) %>%
+    rename( categoryCombo = id , category = id1 ) %>%
+    inner_join( md$categories  %>% select( id, categoryOptions ), 
+                by = c('category' = 'id' )
+                ) %>%
+    unnest( categoryOptions ) %>% 
+    count( categoryCombo ) %>%
+    rename( n_options = n )
+
+
+de.selected = de.mal 
+
+
+d.mal.reported = d.reported[ , c("dataElement", "value")] %>% 
+    
+    right_join( 
+        
+        de.selected , 
+        
+        by = c("dataElement" = "id") 
+        
+        ) %>%
+    
+    left_join(
+        
+        options ,
+        
+        by = 'categoryCombo'
+        
+        ) %>%
+    
+   left_join( 
+       
+       dsde %>% select( dataElement.id , dataSet.id ) , 
+       
+       by = c( 'dataElement' = 'dataElement.id' )
+       
+       ) %>%
+    
+   left_join( 
+       
+       md$dataSets %>% select( id, name, periodType, timelyDays ) ,
+       
+       by = c( 'dataSet.id' = 'id' )
+       
+       ) %>%
+    
+    left_join( 
+        
+        n_facilities_assigned_to_datasets , by = 'dataSet.id'
+        
+        ) %>%
+
+    mutate( 
+        
+        val = as.integer(value) 
+
+        , frequency = case_when(
+            periodType %in% "Weekly" ~ 52 ,
+            periodType %in% "Monthly" ~ 12 ,
+            periodType  %in% "Quarterly" ~ 4 ,
+            periodType  %in% "Yearly" ~ 1 ,
+            TRUE ~ 1
+        )
+            
+        , pVal = val / (frequency * n_facilities * n_options ) 
+
+            
+        ) %>% 
+    
+    mutate( 
+                Percent_Reported = sprintf("%1.2f%%", 100 * pVal ) 
+                )
+
+# If a data element linked to >1 dataSet, select the one with greatest number of facilities
+    d.mal.reported = d.mal.reported %>%
+        group_by( dataElement  ) %>%
+        arrange( -n_facilities  ) %>%
+        filter(  row_number() == 1 ) %>%
+        arrange( desc(pVal) ) 
+
+   datatable( d.mal.reported , filter = "top")
+```
+
 # Categories
+
 
 How many **categories** are there? `r length( md$categories$id ) `
 
@@ -983,7 +1269,6 @@ Of these, how many category options are used in the category  option combos?
 ```
 
 <!-- Are there more than one category associated with a category combo? -->
-
 
 
 # Datasets {.tabset .tabset-fade} 
@@ -1137,7 +1422,7 @@ datatable( d %>%
 
 ```
 
-## Reporting Malaria
+## Dataset reporting malaria
 
 
 ```{r datasets }
@@ -1263,30 +1548,9 @@ Count the org units assigned to each form, which is the basis for the number of 
 ```
 
 
-## Numbers of reports available for each data element 
-
-- this takes advantage of pivot table option, aggregationType=COUNT.  Example:
-
-`https://play.dhis2.org/2.28/api/26/analytics/dataValueSet.json?dimension=pe:LAST_12_MONTHS&dimension=dx:hnwWyM4gDSg;CecywZWejT3;AFM5H0wNq3t;bVkFujnp3F2;d92E7cpMvdl;iIBbZPAqnMt;nmh0BSu3vaV;pgi981WXhas;EGUJY3jQdJ6;TQnDEASFsVH;x8gsvCKjGdZ;vzcahelbU5s;kcbTUfABUck&dimension=ou:ImspTQPwCqd&displayProperty=NAME&aggregationType=COUNT`
-
-```{r, data_element_count, eval = FALSE}
-
-url = "https://play.dhis2.org/2.28/api/26/analytics/dataValueSet.json?dimension=pe:LAST_12_MONTHS&dimension=dx:hnwWyM4gDSg;CecywZWejT3;AFM5H0wNq3t;bVkFujnp3F2;d92E7cpMvdl;iIBbZPAqnMt;nmh0BSu3vaV;pgi981WXhas;EGUJY3jQdJ6;TQnDEASFsVH;x8gsvCKjGdZ;vzcahelbU5s;kcbTUfABUck&dimension=ou:ImspTQPwCqd&displayProperty=NAME&aggregationType=COUNT"
-
-c = get( url )[[1]] %>% 
-    
-    rename( id = dataElement ) %>%
-    left_join( de %>% select( id, name ) , by = 'id') %>%
-    rename( dataElement = name ) %>%
-    select( -id ) %>% select( dataElement, everything() )
 
 
-
-datatable(c)
-
-```
-
-## Select variables...
+# Select variables...
 
 - There are `r comma( length( md$dataElements$id ) ) ` data elements, each with potential multiple option combinations (e.g. age groups)
 
@@ -1359,6 +1623,10 @@ NB: Future versions should aspire to having a more elegant interface for selecti
     
     
 ```
+
+
+
+
 
 # Indicators  {.tabset .tabset-fade} 
 
