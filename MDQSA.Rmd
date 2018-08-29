@@ -1,0 +1,744 @@
+---
+title: "DHIS_Review"
+date: "April 6, 2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+params:
+  dhis_instance:  Kenya.demo
+  data_directory:  
+  output_directory: ./ # bug: only uses current directory
+  output_format: html_document
+  create_new: TRUE 
+  cache: FALSE
+  echo: FALSE
+---
+
+
+```{r package_list, message=FALSE, include= FALSE, warning= FALSE }
+
+# list of required packages
+    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "geojsonR", "wellknown" , "geojsonio" , "sp" , "rmapshaper" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "tidyverse", "readxl", "knitrProgressBar")
+
+# Function to test if package is installed 
+    pkgTest <- function( package.list = package.list ){
+        
+        missing.packages = setdiff( package.list , rownames(installed.packages())) 
+        if ( length( missing.packages ) > 0 ) install.packages( missing.packages ) 
+    }
+
+
+# Test if packages loaded
+    pkgTest( package.list )
+
+# load the packages
+    lapply( package.list, suppressMessages( require ) , character.only = TRUE)
+
+
+# load accessory functions
+source('dhis2_functions.R')
+
+```
+
+
+```{r knitr_setup, include = FALSE}
+knitr::opts_chunk$set( echo = params$echo ,
+                       comment = "" ,
+                       cache = params$cache , 
+                       fig.width =  8
+                       )
+
+
+    dhis_instance = params$dhis_instance
+    data_directory = params$data_directory  # folder containing login_file 
+    output_format = params$output_format
+    
+    # this folder will hold output of the metadata and data reviews
+    output_directory =  getwd() # "." is the directory where this file sits. 
+    
+    origin.folder = paste0( ifelse( is.na( data_directory ), "" , 
+                                  paste0( dhis_instance, "/" ) 
+                                  ) ,
+                          dhis_instance , "/")
+    
+    if (!dir.exists( origin.folder ) ) dir.create( origin.folder )
+    
+  
+ # login shortcuts
+
+origin.login = function(){
+    source( 
+    paste0( origin.folder, 
+            tolower( params$dhis_instance) , 
+            "_login" )
+    )
+
+  loginDHIS2( baseurl, username, password)
+}
+
+# test login 
+ assert_that( origin.login() )
+  
+    
+```
+
+
+```{r parameters2 }
+    params.list = list(
+        dhis_instance = dhis_instance , # selects dhis2 instance
+        data_directory = data_directory ,  # root data directory
+        output_directory = output_directory ,
+        cache = FALSE ,
+        echo = FALSE 
+    )
+
+    outputs = data_frame( 
+        output_format = c(  "html_document", 'word_document'),
+        output_suffix = c(  "html", 'doc')
+    )
+    
+    output.suffix = outputs %>% 
+        filter( output_format == params$output_format ) %>% 
+        .$output_suffix
+```
+
+## **`r toupper( params$dhis_instance )` **
+
+This script creates the review documents by first downloading and cleaning some data from DHIS2.  Some of these steps require several minutes to an hour.  Those steps that require more than a few minutes are do
+## Fetch Required Data 
+### 1. Download DHIS2 Metadata (~5-10 min)
+
+```{r all_meta.  }
+
+  meta_data_file = paste0( origin.folder ,
+                           dhis_instance, 
+                           "_metadata.rds" ) 
+
+  keep_the_existing_one = TRUE # so, dont download a new one.  
+  ## This variable overrides the global parameter,  create_new
+  
+  if ( (!file.exists( meta_data_file) | params$create_new ) & !keep_the_existing_one ) {
+   
+    # origin.login in to server
+    origin.login()
+
+    # there are a couple forms of metadata in the api.  This code tests the format, then gets metadata
+    # if available, use resources method
+    url = paste0( baseurl, "api" )
+    resources =  try( get( url )[['resources']] )
+    
+    # if resources available, get each one      
+    if ( !class( resources ) %in% "try-error" ){   
+        # View(resources)
+        
+        n_resources = nrow( resources )
+        pb <- progress_estimated( n_resources )
+     
+        # test:  t = get_resources( 55 )[[1]]
+    
+        md = map( 1:n_resources , ~get_resources( .x )[[1]] )
+        
+        null_meta = map_lgl(  1:n_resources ,  ~is.null( md[[.x]]) ) %>% which
+        
+        # try again  if null
+        md.try.again = map( null_meta , ~get_resources( .x )[[1]]  ) 
+        names( md.try.again ) = map_chr( null_meta , ~resources$plural[.x] )
+        # View( md.try.again )
+        
+        # if retry worked, update me 
+        try.again.worked = map_lgl(  1:length(md.try.again) , ~!is.null( md.try.again[[.x]] ) ) %>% which
+        
+        for ( i in 1:length(try.again.worked ) ){
+            md[[ null_meta[ try.again.worked[i] ] ]] = md.try.again[[ try.again.worked[i] ]]
+        }
+        
+        names( md ) = map_chr( 1:n_resources , ~resources$plural[.x] )
+        
+
+    } else { # or else, get metadata as one download
+        
+        url <- paste0( baseurl, "api/metadata.json" )
+        
+        md =  get( url ) 
+    
+    }
+    
+    
+    # re-order alaphabetically to be easier to browse in View
+    md = md[ order( names(md) ) ]
+
+ 
+    
+    if ( file.exists( meta_data_file) | params$create_new  ){ 
+        
+        file.rename( meta_data_file ,
+                     paste0( meta_data_file , 
+                             format(Sys.time(), "%b%d%Y")
+                                                        )
+                     )
+    }
+         
+    if ( !file.exists( meta_data_file) ) write_rds( md, meta_data_file )
+    
+  } else {
+      
+       md = read_rds( meta_data_file )
+  }
+  
+  # Get installed apps
+  apps_data_file = paste0( origin.folder ,
+                           dhis_instance, 
+                           "_apps.rds" ) 
+  
+   if ( !file.exists( apps_data_file) | params$create_new ){
+   
+        origin.login()
+    
+        # url<-paste0(baseurl,"api/appStore") # available apps ins store
+        url<-paste0(baseurl,"api/apps") # installed apps
+          
+        apps = get( url ) 
+          
+        write_rds( apps, apps_data_file )
+    
+  } else {
+      
+       apps = read_rds( apps_data_file )
+  }
+  
+  # Retrieve access data 
+  date_metadata = file.info( meta_data_file )$ctime 
+  
+```
+
+### 2. Test facility geocodes to see if they are in their respective administrative areas (~2-5 min)
+
+
+```{r admins. }
+
+
+# orgUnits that are polygons (likely admin), and open
+
+admins = md$organisationUnits %>% 
+    select( id, name, coordinates, openingDate, closedDate, path  ) %>%
+    as.tibble %>% 
+    mutate( 
+        feature_type = map_chr( coordinates, ~feature_type(.x) ) 
+        ) %>%
+    filter( feature_type %in% 'Polygon'  ) %>%
+    # filter( !is.na(coordinates), is.na( closedDate ) )  %>%
+    mutate(
+        
+        level = map_int( path,
+                         ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+            ) ,
+        
+        Year = year( ymd_hms( openingDate ) )  %>% ifelse( .<2014, 2014, .) ,
+        
+        coordinates = fix_coordinate_brackets( coordinates ) ,
+        
+        str_js = paste( 
+            '{ "type": "MultiPolygon", "coordinates": ' ,
+            coordinates , ' }' 
+            )
+        
+    ) %>%
+    as.tibble()
+
+
+    char_js. = map( admins$str_js, ~ FROM_GeoJson( .x ) ) 
+ 
+    polys = map( 1:length(char_js.) , 
+                 ~map( .x, 
+                      ~map( char_js.[[.x]]$coordinates , Polygon ) 
+                 )[[1]]
+    )
+    
+    pgons = map( 1:length(polys),  
+                 ~ Polygons( polys[[.x]]  , as.character(.x)  ) )
+    spoly = SpatialPolygons( pgons )
+    proj4string( spoly ) = CRS("+proj=longlat +datum=WGS84")
+
+    admins$polygons = spoly
+    
+    # add centroids
+    admins$centroids = geosphere::centroid( admins$polygons )
+    admins$long = admins$centroids[ , 1 ]
+    admins$lat = admins$centroids[ , 2 ]
+    
+    # plot( admins$polygons )
+    
+
+# NB TODO: Give message for coordinates missing lat long
+    
+ # save 
+ admins_file =  paste0( origin.folder , dhis_instance, "_admin_boundaries.rds" ) 
+ if ( file.exists( admins_file ) & params$create_new ) file.rename( admins_file , 
+                                                                     paste0( admins_file , 
+                                                              format(Sys.time(), "%b%d%Y")
+                                                              )
+                                            )
+ 
+ saveRDS( admins , admins_file )
+ 
+```
+
+
+```{r cleangeoAdmins. }
+
+# fixing holes and other issues.  added this simplify step to accomodate polygons with some geo-integrity problems (Nigeria)
+
+admins = readRDS( admins_file )
+
+admins$polygons = rmapshaper::ms_simplify(admins$polygons  )  
+
+# if this step fails--because it results in too little detail, increase the paramater keep = .50 or higher.  default is 0.05 
+
+# NB: todo:  test the polygons to see if they have too much detail (Malawi), compared with countries with very little (Nigeria)
+
+# plot( admins$polygons )
+
+```
+
+
+```{r clinics.  }
+
+# orgUnits that are points (likely HF), and open
+clinics = md$organisationUnits %>% 
+    select( id, name, coordinates, openingDate, closedDate, path  ) %>%
+    as.tibble %>% 
+    mutate( 
+        feature_type = map_chr( coordinates, ~feature_type(.x) ) ,
+        # remove quotation marks
+        coordinates = gsub('"', '', coordinates) ,
+        level = map_int( path,
+                         ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+            ) ,
+        Year = year( ymd_hms( openingDate ) )  %>% ifelse( .<2014, 2014, .) 
+        ) %>%
+    filter( !feature_type %in% 'Polygon' ) %>%
+    separate( coordinates, c('long', 'lat'), sep = ',', remove = FALSE ) %>% 
+    # filter( !is.na(long), !is.na(lat), is.na( closedDate ) ) %>%
+    mutate(
+        long = as.numeric(  substr(  long, 2, nchar(long) ) ) ,
+        lat =  as.numeric(  substr(  lat, 1, nchar(lat)-1 )  ) 
+    ) 
+
+
+ # save 
+ clinics_file =  paste0( origin.folder , dhis_instance, "_facilities.rds" ) 
+ 
+ if ( file.exists( clinics_file ) & params$create_new ){
+     
+     file.rename( clinics_file , 
+                  paste0( clinics_file , 
+                          format(Sys.time(), "%b%d%Y")
+                          )
+                  )
+ }
+ 
+ if ( !file.exists( clinics_file ) | params$create_new  ) saveRDS( clinics , clinics_file )
+ 
+
+```
+
+_ for each non Admin orgUnit, 
+- if it is geocoded, check if it is within the admin it belongs to
+- if not geocoded, randomly assign geocode with admin it belongs to
+
+Step: find orgUnit with polygon data that it belongs to. Separate path and transform to long lorm
+
+```{r clinics2.}
+
+ if ( !exists( "clinics" ) | params$create_new ) clinics = readRDS( clinics_file )
+
+# Long form or clinics dataframe with row for each clinic-parent
+clinics. = clinics %>%
+    mutate( 
+        paths = map( path, ~str_split( .x,  "\\/"  ) ) 
+    ) %>% unnest( paths ) %>% unnest( paths ) %>%
+    rename( parent.id = paths ) %>%
+    group_by( id ) %>%
+    mutate(
+        parent.level = row_number() - 1
+    ) %>% 
+    ungroup() %>% 
+    
+    # join with admins
+    left_join( admins %>% 
+                    select( id, name ) %>% 
+                    rename( parent.name = name) , 
+                by = c( 'parent.id' = 'id' ) 
+                ) %>%
+    
+    filter( !is.na( parent.name ) )
+
+# clinics.$polygon = admins$polygons[ match( clinics.$parent.id , admins$id )]
+
+
+
+```
+
+
+- Check if facility with coordinates is in parent 
+
+```{r facilityInParent. }
+
+ # c is data.frame of clinics with coordinates
+ # c.fix, below, is a subset of c, listing clinics whose coordinates are not in a parent
+ # c., farther below, is c updated from c.fix and c.impute
+
+
+ updated_facilities_file =  paste0( origin.folder , 
+                            dhis_instance,
+                            "_updated_facilities.rds" 
+                            ) 
+ 
+keep_the_existing_one = TRUE # so, dont download a new one.  
+  ## This variable overrides the global parameter,  create_new
+
+ if ( ( file.exists( updated_facilities_file ) & !params$create_new ) | keep_the_existing_one ){
+     
+     c = readRDS( updated_facilities_file ) %>% 
+         dplyr::select( 1:16 )
+         
+ } else {
+     
+     c = clinics. 
+ 
+     nc = nrow(c)
+     
+     pb <- progress_estimated( nc )
+     
+     # test if facility is in lowest parent level
+     c= c %>% 
+         group_by( id ) %>%
+         # filter( parent.level == max( parent.level ) ) %>%
+         ungroup() %>%
+         mutate(
+             in.parent = map2_lgl( id, parent.id , is.in.parent, .pb = pb ) ,
+             
+             has.coordinates = ifelse( is.na( lat ) | is.na( long ), FALSE, TRUE )
+         )
+ }
+ 
+ 
+ count(c, has.coordinates , level , in.parent , parent.level ) %>% 
+     spread( parent.level, n )
+ 
+ 
+```
+
+- Try fixing the ones that are not in parent
+
+```{r c.fix. }
+ 
+ c.fix = c %>%
+     filter( has.coordinates  %in% TRUE, in.parent %in% FALSE ) 
+
+ ncfix = nrow(c.fix)
+ in.parent.fix = vector("list", length = ncfix ) 
+ p <- progress_estimated(ncfix )
+ 
+ for ( i in 1:ncfix ){
+     
+        p$pause(0)$tick()$print()
+     
+        in.parent.fix[[i]] = map2_lgl( c.fix$id[i], 
+                                   c.fix$parent.id[i] , 
+                                   ~is.in.parent( .x, .y  , fix = TRUE )
+        )
+ }        
+ 
+ c.fix$in.parent.fix = in.parent.fix %>% unlist   
+
+
+ count(c.fix, level ,  in.parent.fix , parent.level ) %>% spread( parent.level, n )
+
+ # Update c with c.fix
+ c. = left_join( c, c.fix %>% select( id, parent.level, in.parent.fix ), 
+                by = c( 'id' , 'parent.level' ) 
+                ) %>%
+     mutate(
+         long. = ifelse( in.parent.fix %in% TRUE , lat, long ) ,
+         lat. = ifelse( in.parent.fix %in% TRUE , long , lat ) ,
+         long = long. ,
+         lat = lat.
+     ) %>%
+     select( -long., -lat. )
+ 
+
+```
+
+- If coordinates are missing, or the clinic is not in its parent, then impute a location.
+
+```{r ImputeLocation. }
+
+facilities_file =  paste0( origin.folder , dhis_instance, "_updated_facilities.rds" ) 
+
+if ( file.exists( facilities_file ) )  facilities = readRDS( facilities_file )
+
+if ( !exists( "facilities" ) ){
+     c.impute = c. %>% 
+        filter( 
+            !has.coordinates | (!in.parent & !in.parent.fix) , !is.na( parent.name )
+            ) %>%
+        group_by( id ) %>%
+        filter( row_number()==n() )  %>% # select last row
+        select( id, parent.id ) %>%
+        ungroup
+     
+     
+     ncimpute = nrow( c.impute )
+     impute.coords = vector("list", length = ncimpute ) 
+     p <- progress_estimated( ncimpute )
+     
+     for ( i in 1:ncimpute ){
+         
+            p$pause(0)$tick()$print()
+         
+            impute.coords[[i]] = impute.location(  c.impute$parent.id[i] ) 
+                                    
+     }        
+     
+     c.impute$long.impute  = map_dbl( impute.coords , 1 ) 
+     c.impute$lat.impute  = map_dbl( impute.coords , 2 ) 
+     
+     # glimpse( c.impute )
+    
+     # Update c. with c.impute
+     c.. = left_join( c., c.impute ,  by = c( 'id' , 'parent.id' )  ) %>%
+         group_by( id ) %>%
+         filter( row_number()==n() )  %>% # select last row
+         ungroup %>%
+         # use best available coordinates from c.fixed and c.impute 
+         mutate( 
+             lat. = ifelse( is.na( lat.impute ) , lat, lat.impute ) ,
+             long. = ifelse( is.na( long.impute ) , long, long.impute ) ,
+             impute = !is.na( long.impute )
+             )
+     
+      # save 
+     facilities_file =  paste0( origin.folder , dhis_instance, "_updated_facilities.rds" ) 
+     if ( file.exists( facilities_file ) & params$create_new ){ 
+    
+     file.rename( facilities_file , 
+                  paste0( facilities_file ,
+                          format(Sys.time(), "%b%d%Y")
+                          )
+                  )
+ }
+ 
+    saveRDS( c.. , facilities_file )
+ 
+ }
+
+ 
+```
+
+
+### 3. Query DHIS2 to determine frequency that selected data elements were submitted (~10-90 min)
+
+
+```{r de.}
+
+    de = md$dataElements
+    
+    # Convert category combo from df to list (ends up with id as character)
+    de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
+    
+    # dataElement vars
+    # names( de )
+
+```
+
+```{r search_data_elements. }
+    
+    mal = quo( grepl( '\\<malaria\\>|palu' , de$name , ignore.case = TRUE ) )
+    TB = quo( grepl( '\\<tb\\>' , de$name , ignore.case = TRUE ) )
+    HIV = quo( grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) )
+    imm = quo( grepl( 'imm' , de$name , ignore.case = TRUE ) )
+    conf = quo( grepl( 'conf' , de$name , ignore.case = TRUE ) )
+    susp = quo( grepl( 'susp' , de$name , ignore.case = TRUE ) )
+    opd = quo( grepl( '\\<opd\\>' , de$name , ignore.case = TRUE ) )
+    ipd = quo( grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )  )
+    patients = quo( grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
+         !grepl( '\\<hiv\\>|\\<tb\\>' , de$name , ignore.case = TRUE )
+         )
+    fever = quo( grepl( '\\<fever\\>' , de$name , ignore.case = TRUE )  &
+         !grepl( '\\<yellow\\>|\\<typhoid\\>' , de$name , ignore.case = TRUE )
+         )
+    attendance = quo( grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE ) )
+    anc = quo( grepl( '\\<anc\\>|\\<CPN\\>|\\<IPT\\>|\\<TPI\\>' , de$name , ignore.case = TRUE ) )
+    deaths = quo( grepl( 'death' , de$name , ignore.case = TRUE ) )
+    pop = quo( grepl( 'pop' , de$name , ignore.case = TRUE ) )
+    stock = quo( grepl( 'stock|rupture|\\<out\\>' , de$name , ignore.case = TRUE ) )
+    malaria_stock = quo( grepl( 'stock|rupture' , de$name , ignore.case = TRUE )  &
+         grepl( '\\<RDT\\>|\\<TDR\\>|\\<IPT\\>|\\<ACT\\>|\\<ASAQ\\>|\\<AL\\>|\\<APT\\>|<\\PTI\\>|\\<SP\\>|\\<fansidar\\>' , de$name , ignore.case = TRUE ) )
+    
+# More complicated search for malaria terms
+    malaria_terms_whole_words = 'malaria palu PF plasmodium RDT TDR IPT ACT ASAQ AL APT TPI SP fansidar slide micro fever fievre ANC CPN' %>%
+        stri_extract_all_words %>% unlist %>%
+        
+        # add '\\<' so that only whole word is found
+        sprintf( "\\<%s\\>", . )
+    
+    malaria_terms_part_words = NULL  # 'conf susp' %>% stri_extract_all_words %>% unlist
+    
+    malaria_search_terms = paste(  
+        c( malaria_terms_whole_words , 
+           malaria_terms_part_words ) ,
+        collapse = '|'
+    )
+    
+    malaria_items = quo( grepl( malaria_search_terms, de$name , 
+                      ignore.case = TRUE ) 
+                      &
+         !grepl( '\\<hiv\\>|\\<tb\\>|MTCT|\\<yellow fever\\>|\\<typhoid fever\\>' , de$name , ignore.case = TRUE )
+    )
+         
+# Organise all the searches as a list
+    searches = list( mal, malaria_items, TB, HIV, imm, conf, susp, opd, ipd, patients, fever, attendance, anc, deaths, pop , stock, malaria_stock )
+    
+    names.searches  = c( 'mal', 'malaria_items', 'TB', 'HIV', 'imm', 'conf', 'susp', 'opd', 'ipd', 'patients', 'fever', 'attendance', 'anc', 'deaths', 'pop', 'stock', 'malaria_stock' )
+    
+    
+    names( searches ) = names.searches 
+    
+# perform all searches and count number of hits    
+    search = 
+        map_df( seq_along(searches), 
+                ~data_frame(
+                    Search =   names.searches[.x] ,
+                    search_text = f_rhs( searches[[.x]] ) %>% deparse ,
+                    Count = sum( eval_tidy( searches[[.x]] ) )
+    ))
+    
+    kable( search , row.names = FALSE)
+
+```
+
+```{r dataElementReporting }
+
+  all.de = Reduce(  "|" , map( searches, eval_tidy  ) )
+  # sum( all.de )
+
+  display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
+                                 'categoryCombo', 'id' )
+     
+  de.mal = de[  eval_tidy( malaria_items) , display.vars ]
+
+  reported_data_file = paste0( origin.folder ,
+                           dhis_instance, 
+                           "_reported.rds" ) 
+  
+  
+  new.dataElements = NULL
+
+  
+  
+  if ( file.exists( reported_data_file)  ){
+    
+     d.reported =  readRDS( reported_data_file )
+     
+     d.reported.dataElements =  count( d.reported , dataElement ) %>% .$dataElement 
+     
+  } else {
+      
+      d.reported.dataElements = NULL 
+  }
+  
+  
+  new.dataElements =  setdiff( de.mal$id[ order( de.mal$id )] ,  d.reported.dataElements )
+
+  nde = length( new.dataElements)
+  
+  if ( nde > 0 ){
+        
+        d.reported = api_last12months_national_data( 
+            
+            de.include = de[ all.de, ] ,
+            file = reported_data_file ,
+            details = TRUE 
+            
+            )
+        
+
+        saveRDS( d.reported , reported_data_file )
+        
+  } 
+
+
+ 
+
+```
+
+## Metadata
+
+```{r Metadata_Review. }
+    output.filename = paste0( output_directory, "/" ,
+                              dhis_instance, "/", 
+                             dhis_instance, "_Metadata." ,
+                             output.suffix
+                             ) 
+
+    if ( !file.exists( output.filename ) | params$create_new ) { 
+
+        rmarkdown::render( 'Display_Metadata.Rmd' ,
+                           
+           output_file = output.filename ,
+           output_format = output_format ,
+           # 'knitrBootstrap::bootstrap_document' ,
+           params = params.list ,
+           envir = new.env() ,
+           encoding = "UTF-8"
+           )
+         
+    }
+
+   if ( file.exists( output.filename )) browseURL( output.filename ) 
+
+```
+
+
+## Select data elements to review
+
+```{r dataElement_Selection. }
+
+    de.review.xlsx = paste0( output_directory , "/" ,
+                             dhis_instance , "/" ,
+                             dhis_instance , "_" , 
+                             "dataElements.xlsx" )
+    
+    # if exist, open excel file
+    if ( file.exists( de.review.xlsx ) )  browseURL( de.review.xlsx )
+    
+    
+```
+
+## Data
+
+```{r data_Review. , eval = FALSE }
+    output.filename = paste0( output_directory, "/" ,
+                              dhis_instance, "/", 
+                             dhis_instance, "_data." ,
+                             output.suffix
+                             ) 
+
+    if ( !file.exists( output.filename ) | params$create_new ) { 
+
+        rmarkdown::render( 'Review_Data.Rmd' ,
+                           
+           output_file = output.filename ,
+           output_format = output_format ,
+           # 'knitrBootstrap::bootstrap_document' ,
+           params = params.list ,
+           envir = new.env() ,
+           encoding = "UTF-8"
+           )
+         
+    }
+
+   if ( file.exists( output.filename )) browseURL( output.filename ) 
+
+```

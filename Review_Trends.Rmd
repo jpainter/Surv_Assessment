@@ -10,7 +10,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Tanzania
+  dhis_instance: Uganda
   data_directory:  .
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -321,65 +321,6 @@ Number of facilities reporting every month for the last 48 months, by dataset an
 
 ```{r continuous_submisison}
 
-# function to determine which facilities reporting during previox xx intervals
-
-continuous = function( data = submission , months = 24 ){
-    
-    periods = fast_strptime( as.character( data$period ) , "%Y%m") 
-    max_period = max(periods, na.rm = TRUE)
-    first_month_in_interval = max_period %m-% months( months )
-    
-    continuous.interval = interval( first_month_in_interval , max_period ) 
-
-    available.interval = interval( min(periods, na.rm = TRUE) , 
-                               max(periods, na.rm = TRUE) ) 
-    
-    n_periods = time_length( available.interval , 'months')
-    
-    
-    if (n_periods < months){
-        print( paste(
-            'There are only', n_periods, 'intervals; the function will test for contiunous submission for up to', n_periods, 'intervals.' 
-            ) )
-        
-         continuous.interval = available.interval 
-        
-    }
-    
-
-    s = data %>%
-        
-        # Remove any rows with all missing data
-        select( -starts_with( 'NA' ) ) %>%
-        filter( complete.cases(.) ) %>%
-            
-        mutate( dates = fast_strptime( as.character( period ) , "%Y%m") %>%
-                    as.POSIXct()
-                ) %>%
-        filter( 
-            dates %within% continuous.interval
-                ) %>% 
-        group_by(
-            dataElement , orgUnit 
-            ) %>%
-        summarise( 
-            n = n() , 
-            continuous = n() >= months
-            ) 
-    
-    
-        # mutate( 
-        #     all = factor( continuous  ,
-        #                   levels = c( TRUE, FALSE ) ,
-        #                   labels = c("Clinics continuosly reporting" , 
-        #             'Other clinics' )
-        #             )
-        # )
-        
-    
-    return(s)
-}
-
 # number of continuously reporting orgUnits by level for each dataElement 
  d = continuous( data_totals, months = 36 )  %>%  
     left_join(
@@ -455,7 +396,7 @@ continuous = function( data = submission , months = 24 ){
     select( -id ) %>%
       
     # Include only those that are most_continuous_elements
-     filter( dataElement %in% most_continuous_elements ) %>%
+     # filter( dataElement %in% most_continuous_elements ) %>%
     
     mutate( de_ds = paste0( dataSet , "__", dataElement ))
 

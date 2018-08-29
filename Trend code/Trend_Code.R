@@ -7,6 +7,75 @@ library(forecast)
 library(seasonal)
 library(stlplus)
 library(zoo)
+library( tsibble )
+
+dataset.translated = function( dataset_detail = NULL, .ous = NULL, .meta = NULL ){
+    
+    stopifnot( !is.null( dataset_detail ) & !is.null(meta) )
+    
+    stopifnot( 'categoryOptionCombo' %in% names( dataset_detail ) )
+    
+    if ( is.null( ous ) ){
+        
+        if( !is.null( meta ) ){ 
+            
+            ous = ous.translated( meta , open.only = FALSE) 
+            
+        } else {
+            print( "Function dataset.translated() stopped. Need to provide ous or meta")
+        }
+    }
+    
+    idname = c('id', 'name')  # shortcut for fetching these two columns
+    
+    d = dataset_detail %>%
+        inner_join(meta$dataElements[ , idname ], by = c('dataElement' = 'id' ) ) %>%
+        rename( dataElement.name = name ) %>%
+        inner_join(meta$categoryOptionCombos[ , idname ], by = c('categoryOptionCombo' = 'id' ) ) %>%
+        rename( categoryOptionCombo.name = name ) %>%
+        inner_join( ous, by = 'orgUnit' ) %>%
+        separate( period, into = c("year", "month") , sep = 4 , remove = FALSE ) %>%
+        mutate_at( c("year", "month") , as.integer ) %>%
+        mutate(
+            date = as_date( ymd(paste(year, month, 15, sep = "-")) )
+        ) %>%
+        as.tibble()
+}
+
+ous.translated = function(  meta = NULL, 
+                            open.only = TRUE  # limit to clinics currently open, only
+                            ){
+    
+    
+    
+    stopifnot( !is.null(meta) )
+    
+  
+    meta$organisationUnits %>%
+        select( id, name, openingDate, closedDate, path, coordinates ) %>%
+        
+        filter( if ( open.only ){ is.na(closedDate) } else { TRUE }  ) %>%  
+        
+        mutate(
+            feature = map_chr( coordinates, ~feature_type(.x ) ) 
+        ) %>%
+
+        rowwise() %>%
+        mutate( 
+            level = str_count( path , "/") , 
+            parent_ou = parse_parent_ous(path) 
+                
+                ) %>% 
+        left_join( meta$organisationUnits[ , c('id', 'name')] 
+                   %>% rename( parent_ou.name = name ) ,
+                   by = c( 'parent_ou' = 'id' )) %>%
+        
+        ungroup() %>%
+        select( -path , -closedDate ) %>%
+        rename( orgUnit = id, orgUnit.name = name )
+    
+    
+}
 
 ous.random = function( .level){  #samples OU id within OU level
     
@@ -18,6 +87,65 @@ ous.random = function( .level){  #samples OU id within OU level
 }
 
 # TIME-Series  ####
+
+ts.df = function( data , start_year = NA , .pb = NULL ){
+    
+    # progress bar
+    update_progress( .pb ) 
+    
+    # create time-series for selcted OU and dataElement (total: need to sum over category combo)
+    d_ou_de = data
+    
+    if ( nrow( d_ou_de) == 0) return( ts() )
+    
+    if ( !is.na(start_year) ){
+        d_ou_de = d_ou_de %>% filter( sub_str( period, 1, 4 ) >= start_year )
+    }
+    
+    values = d_ou_de$value
+    periods = d_ou_de %>% 
+        mutate( 
+            year = substr( period, 0 , 4 ) %>% as.integer() ,
+            month = substr( period, 5, 6 ) %>% as.integer()
+        )
+    
+    ts_ou_de = ts( values , 
+                   start = c( periods[1,] %>% .$year , periods[1,] %>% .$month  ) , 
+                   end = c( periods[nrow(periods),] %>% .$year , periods[nrow(periods),] %>% .$month  ) ,
+                   frequency = 12 
+    )
+    
+    return( ts_ou_de )
+}
+
+ts.ou = function( data , start_year = NA ){
+    
+    # create time-series for selcted OU and dataElement (total: need to sum over category combo)
+    d_ou_de = unnest( data ) %>% select( period, value )
+    
+    if ( nrow( d_ou_de) == 0) return( ts() )
+    
+    if ( !is.na(start_year) ){
+        d_ou_de = d_ou_de %>% filter( sub_str( period, 1, 4 ) >= start_year )
+    }
+    
+    values = d_ou_de$value
+    periods = d_ou_de %>% 
+        mutate( 
+            year = substr( period, 0 , 4 ) %>% as.integer() ,
+            month = substr( period, 5, 6 ) %>% as.integer()
+            )
+    
+    ts_ou_de = ts( values , 
+                   start = c( periods[1,] %>% .$year , periods[1,] %>% .$month  ) , 
+                   end = c( periods[nrow(periods),] %>% .$year , periods[nrow(periods),] %>% .$month  ) ,
+                   frequency = 12 
+    )
+    
+    return( ts_ou_de )
+}
+
+
 ts.ou.de = function(data , ous , de , start_year = NA ){
     
     # create time-series for selcted OU and dataElement (total: need to sum over category combo)
@@ -57,17 +185,30 @@ ts.ou.de = function(data , ous , de , start_year = NA ){
 
 
 # Decompose functions ####
-decompose.stl = function( df , 
+decompose.stl = function( df , year = NULL ,
                           transform = ""
-                          , plot = TRUE , coe = TRUE, title = "" ){
+                          , plot = TRUE , .coe = TRUE , title = "" , 
+                          .pb = NULL ,
+                          ...
+                          ){
+    # progress bar
+    update_progress( .pb ) 
     
-    if ( sum(!is.na( df )) < 27 ) return(NA)
+    if (!is.null(year) ){
+        ts = window( df, year )
+    } else { 
+        ts = df 
+    }
     
-    ts = df 
+    
+    if ( sum(!is.na( ts )) < 27 ) return(NA)
+
+    
     if ( transform %in% "log" ){
         ts[ ts == 0 ] = 1
         ts = log( ts )
     } 
+    
     # STL decompose and coefficient of variation
     stl_model = try( stlplus( ts, s.window = 'periodic', n.p = 12  ) )
     
@@ -78,7 +219,7 @@ decompose.stl = function( df ,
     #     # glimpse( stl_df$data )
     # }
 
-    raw = df 
+    raw = ts 
     stl_trend = trend( stl_model ) 
     stl_seasonal = seasonal( stl_model )
     rem = remainder( stl_model )
@@ -89,11 +230,11 @@ decompose.stl = function( df ,
     
     # coeficient of error?  ration of remainder to projected (seasonal+trend)
     # coe = scales::percent( rem_sd / mean(stl_seasonal + stl_trend) )
-    coe = scales::percent( rem_sd / mean(raw , na.rm = TRUE ) )
+    coe = rem_sd / mean( raw , na.rm = TRUE )
     
     
     stl_output = tibble(
-        date = date ,
+        date = as.yearmon( time( ts ) ) ,
         raw = raw , 
         seasonal = stl_seasonal, 
         remainder = rem , 
@@ -103,12 +244,14 @@ decompose.stl = function( df ,
     if ( transform %in% "log" ){
         stl_output = stl_output %>%
             mutate( 
+                date = as.Date( as.yearmon( time( ts ) ) ),
+                raw = raw , 
                 seasonal = exp( seasonal )
                 , trend = exp( trend ) 
                 , remainder = exp( remainder )
                 )
         
-        coe = scales::percent( sd( stl_output$remainder , na.rm = TRUE  ) )
+        coe = sd( stl_output$remainder   , na.rm = TRUE  ) 
     }
         
     
@@ -126,12 +269,12 @@ decompose.stl = function( df ,
             facet_grid( var ~ . , scales = 'free' ) +
             theme_bw() +
             labs( title = title , 
-                  subtitle = paste( "Coefficient of Variation:" , coe ) ,
+                  subtitle = paste( "Coefficient of Variation:" , scales::percent(coe) ) ,
                   caption = paste( transform, ":" , "" ) )
         print(g)
     }
     
-    if (coe){
+    if (.coe){
         return( coe )
     } else {
         return( stl_model )
@@ -139,8 +282,8 @@ decompose.stl = function( df ,
     
 }
 
-## X-13ARIMA-SEATS decompose ####
-decompose.seas = function( df , plot = TRUE , cov = TRUE , 
+## X-13ARIMA-SEATS decompose FASTer version, COE only ####
+decompose.seas.coe = function( df , plot = TRUE , cov = TRUE , model = TRUE , 
                            transform = "log" ,
                            detect_outliers = FALSE ,
                            title = "", 
@@ -149,13 +292,11 @@ decompose.seas = function( df , plot = TRUE , cov = TRUE ,
                            missing_one = FALSE , # deprecated
                            smooth = FALSE , # take moving average before analysing
                            impute = FALSE ,
+                           verbose = FALSE ,
                            ...
-                           ){
+){
     
-    # return NA if not enough data to model
-    # if ( sum(!is.na( df )) < 27 ) return(NA)
-    # if ( sum( df > 0 , na.rm = TRUE )< 26 )  return(NA)
-    
+
     if (detect_outliers){ .outliers = ""} else { .outliers = NULL} 
     
     # impute missing values
@@ -165,6 +306,157 @@ decompose.seas = function( df , plot = TRUE , cov = TRUE ,
         df.adjusted = ifelse( df.adjusted<0, 0, df.adjusted )
     } else {
         df.adjusted = df 
+    }
+    
+    ## need to replace missing values with zero (but not missing dates; there should be no missing dates at this point)
+    
+    if (smooth){
+        s = ma( df.adjusted , order = 2 , centre = FALSE)
+        df.adjusted = s
+    } 
+    
+    if ( transform  %in% "log" ){
+        
+        df.adjusted[ df.adjusted == 0 ] = 1L
+    }
+    
+    seas_df <- try( 
+        
+        seasonal::seas( df.adjusted
+                        , na.action =  na.x13
+                        # , x11 = "" # optional use of X11 model
+                        # , x11 = list()
+                        , arima.model = arima 
+                        , regression.variables = regression_variables
+                        , regression.aictest = NULL
+                        , outlier = .outliers
+                        , transform.function = transform 
+                        , seats.noadmiss = "no"
+                        
+        )
+    )
+    
+    
+    # if fails, try with seasonal approximation (seats.noadmiss = 'yes')
+    if ( class(seas_df) %in% "try-error" ){
+        
+        seas_df <- try( 
+            
+            seasonal::seas( df.adjusted
+                            , na.action =  na.x13
+                            # , x11 = "" # optional use of X11 model
+                            # , x11 = list()
+                            , arima.model = arima 
+                            , regression.variables = regression_variables
+                            , regression.aictest = NULL
+                            , outlier = .outliers
+                            , transform.function = transform 
+                            , seats.noadmiss = "yes"
+                            
+            )
+        )
+        
+    } 
+    
+    # if still fails, NA
+    if ( class(seas_df) %in% "try-error" ) return( NA )
+    
+    if ( !is.ts(seas_df$data) ) return( NA )
+    
+    # plot(seas_df)
+    # summary(seas_df)
+    # final(seas_df)
+    # View( seas_df$data )
+    
+    # if no seasonal componenet (e.g. seasonal value always 1), repeat as X11 model
+    if ( "seasonal" %in% colnames(seas_df$data) ){
+        seasonal = seas_df$data %>% as_data_frame() %>% .$seasonal %>% as.double()
+    } else {
+        seasonal = rep( 1 , nrow( seas_df$data ))
+    }
+    
+    # test if seasonal always 1 
+    is_not_1 = sum( seas_df$data %>% as_data_frame() %>% .$seasonal != 1 , na.rm = TRUE )
+    
+    if ( is_not_1 == 0 ){
+        
+        seas_df = update( seas_df, x11 = "", transform.function = "auto" )
+        
+        seasonal = seas_df$data %>% as_data_frame() %>% .$seasonal %>% as.double()
+    }
+    
+    # remainder and trend , and raw
+    rem = seas_df$data %>% as_data_frame() %>% .$irregular %>% as.double()
+    
+    trend = seas_df$data %>% as_data_frame() %>% .$trend %>% as.double()
+    
+    raw = as.integer( df ) 
+    
+    adjusted = as.integer( df.adjusted )
+    
+    if (length( raw ) == 0 ) return( NA )
+    
+    date = as.Date( as.yearmon(time( seas_df$x ) ) ) 
+    
+    
+    rem_mean = mean( rem-1, na.rm = TRUE ) # if centered, should be ~ zero
+    rem_sd = sd( (rem-1) , na.rm = TRUE ) 
+    
+    # if ( seas_df$spc$transform$`function` %in% "log" ){
+    if ( seas_df$udg["finmode"] %in% "multiplicative" | transform  %in% "log" ){
+        
+        coe =  rem_sd
+        
+    } else {
+        
+        coe =  rem_sd / mean(seasonal + trend)
+    }
+    
+    
+    return( coe )
+}
+
+## X-13ARIMA-SEATS decompose ####
+decompose.seas = function( df , year = NULL , plot = TRUE , cov = TRUE , model = TRUE , 
+                           transform = "log" ,
+                           detect_outliers = FALSE ,
+                           title = "", 
+                           arima = "(0 1 1)(0 1 1)12" ,
+                           regression_variables = NULL ,
+                           missing_one = FALSE , # deprecated
+                           smooth = FALSE , # take moving average before analysing
+                           impute = FALSE ,
+                           zero_as_missing = FALSE , 
+                           verbose = FALSE ,
+                           ...
+                           ){
+    
+    
+    if ( !is.null(year) ){
+        ts = window( df, year )
+    } else { 
+        ts = df 
+    }
+    
+    # return NA if not enough data to model
+    # if ( sum(!is.na( ts )) < 27 ) return(NA)
+    # if ( sum( df > 0 , na.rm = TRUE )< 26 )  return(NA)
+    
+    
+    if (detect_outliers){ .outliers = ""} else { .outliers = NULL} 
+    
+    # impute missing values
+    if (impute){
+        
+        library(imputeTS)
+        
+        if ( zero_as_missing ) ts[ ts==0 ] = NA 
+        
+        df.adjusted = na.seadec( ts , "kalman" ) 
+        df.adjusted = ifelse( df.adjusted < 0, 0, df.adjusted )
+        
+    } else {
+        df.adjusted = ts 
     }
     
     ## need to replace missing values with zero (but not missing dates; there should be no missing dates at this point)
@@ -249,7 +541,7 @@ decompose.seas = function( df , plot = TRUE , cov = TRUE ,
     
     trend = seas_df$data %>% as_data_frame() %>% .$trend %>% as.double()
     
-    raw = as.integer( df ) 
+    raw = as.integer( ts ) 
     
     adjusted = as.integer( df.adjusted )
 
@@ -257,14 +549,6 @@ decompose.seas = function( df , plot = TRUE , cov = TRUE ,
     
     date = as.Date( as.yearmon(time( seas_df$x ) ) ) 
     
-    seas_output = tibble(
-        date = date ,
-        raw = raw , adjusted = adjusted , seasonal = seasonal, remainder = rem , trend = trend
-    ) %>%
-        gather( var, value, -date) %>%
-        mutate( 
-            var = factor( var, levels = c('raw', 'adjusted', 'seasonal', 'trend', 'remainder') ) 
-        )
 
         rem_mean = mean( rem-1, na.rm = TRUE ) # if centered, should be ~ zero
         rem_sd = sd( (rem-1) , na.rm = TRUE ) 
@@ -279,19 +563,45 @@ decompose.seas = function( df , plot = TRUE , cov = TRUE ,
             coe =  rem_sd / mean(seasonal + trend)
         }
         
-        g = ggplot( seas_output, aes( x =  date , y = value )) +
-            geom_line() +
-            facet_grid( var ~ . , scales = 'free' ) +
-            theme_bw() +
-            labs( title = title , 
-                  subtitle = paste( "Coefficient of Variation:" , scales::percent(coe) ) ,
-                  caption = paste( transform , ":" , seas_df$model$arima$model ) )
+
+        if ( model ){
+            
+            return_list = list( seas_df )
+            
+        } else { return_list = list() }
         
-        if (cov)  print( coe )
         
-        if (plot) print(g)
+        if (cov){
+            
+            if (verbose) print( coe )
+            return_list = c( return_list, coe ) 
+            
+        }  
+        
+        if (plot){
+            
+            seas_output = tibble(
+                date = date ,
+                raw = raw , adjusted = adjusted , seasonal = seasonal, remainder = rem , trend = trend
+            ) %>%
+                gather( var, value, -date) %>%
+                mutate( 
+                    var = factor( var, levels = c('raw', 'adjusted', 'seasonal', 'trend', 'remainder') ) 
+                )
+            
+            g = ggplot( seas_output, aes( x =  date , y = value )) +
+                geom_line() +
+                facet_grid( var ~ . , scales = 'free' ) +
+                theme_bw() +
+                labs( title = title , 
+                      subtitle = paste( "Coefficient of Variation:" , scales::percent(coe) ) ,
+                      caption = paste( transform , ":" , seas_df$model$arima$model ) )
+            
+            print( g )
+            return_list = c( return_list, g ) 
+        }
    
-        return( list( coe, g, seas_df ) )
+        return( return_list )
 }
 
 ## fixed_arima ####
@@ -436,6 +746,19 @@ forecast_ets = function( df , plot = TRUE , .cov = TRUE ,
     }
     
     
+}
+
+# Show examples ####
+sample_dec = function( data = x.dec, index = 1 ,  method = 'stl' , ... ){
+    
+    df  = x.dec[ index , ]$ts[[1]]
+    df.name = paste(  data$parent_ou.name[ index ]  , " : " ,
+                      data$orgUnit.name[ index ] , " (Total Cases = " ,
+                      scales::comma( data$total[ index ] ), ")" )
+    
+    if (method %in% 'stl') decompose.stl( df  , transform = "log" , title = df.name, ...) 
+    
+    if (method %in% 'seas') decompose.seas( df  , transform = "log" , title = df.name,  ...) 
 }
 
 # a manual version for remving trend and seasonality ####

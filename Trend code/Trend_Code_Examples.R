@@ -8,58 +8,225 @@ source( "Trend code/Trend_Code.R")
 source("dhis2_functions.R")
 
 # Malawi.  Use discordance data to test-estimate decomposition  ####
-malawi = readRDS( "Malawi/Malawi_dataset_details.rds") 
+malawi = readRDS( "Malawi/Malawi_dataset_details.rds") %>% select( -level )
 glimpse( malawi )
 
 meta = readRDS( "Malawi/Malawi_metadata.rds") 
 # View(meta)
 
-# create shortcut to list of orgUnits, creating variable for the level
-ous = meta$organisationUnits[ , c('id', 'name', 'path')] %>%
-    rowwise() %>%
-    mutate( level = str_count( path , "/") , 
-            parent_ou = parse_parent_ous(path) ) %>% 
-    left_join( meta$organisationUnits[ , c('id', 'name')] 
-                %>% rename( parent_ou.name = name ) ,
-                by = c( 'parent_ou' = 'id' )) %>%
-    ungroup() %>%
-    select( -path) 
+# create shortcut to list of orgUnits, creating variables for level and feature type
+# ous = ous.translated( meta , open.only = FALSE)
 
-count( ous, level )
-count( ous, parent_ou.name )
-
-idname = c('id', 'name')  # shortcut for fetching these two columns
-
-d = malawi %>%
-    inner_join(meta$dataElements[ , idname ], by = c('dataElement' = 'id' ) ) %>%
-    rename( dataElement.name = name ) %>%
-    inner_join(meta$categoryOptionCombos[ , idname ], by = c('categoryOptionCombo' = 'id' ) ) %>%
-    rename( categoryOptionCombo.name = name ) %>%
-    inner_join(ous, by = c('orgUnit' = 'id' ) ) %>%
-    rename( orgUnit.name = name ) %>%
-    separate( period, into = c("year", "month") , sep = 4 , remove = FALSE ) %>%
-    mutate_at( c("year", "month") , as.integer ) %>%
-    mutate(
-        date = as_date( ymd(paste(year, month, 15, sep = "-")) )
+# use updated ous
+ous = readRDS( "Malawi/Malawi_updated_facilities.rds") %>% 
+    rename( orgUnit = id, orgUnit.name = name , feature = feature_type ,
+            parent_ou = parent.id , parent_ou.name = parent.name
     )
 
-glimpse(d)
-count( d, level)
-# clinics submitting data
-d %>% group_by(level) %>% summarise(unit = n_distinct(orgUnit))
+glimpse( ous )
+count( ous, level, feature  )
+count( ous, parent_ou.name )
 
-# choose data element
-dataElementNames = unique(d$dataElement.name)
-de.name = dataElementNames[7] # "HMIS Malaria – New Case (under 5)"
-de.id = meta$dataElements[ , c("id", "name")] %>%
-    filter( name %in% de.name ) %>%
-    .$id
+d = dataset.translated( malawi, .ous = ous , .meta = meta  ) %>%
+    
+    # combine data element with category option combo
+    unite( de.coc, dataElement, categoryOptionCombo ) %>%
+    unite( de.coc.name , dataElement.name , categoryOptionCombo.name ) 
+
+glimpse(d)
+count( d, level )
+count( d, feature , level )
+
+# clinics submitting any data
+d %>% group_by(level, feature ) %>% 
+    summarise(unit = n_distinct(orgUnit)) %>%
+    spread( feature , unit )
+
+# choose data element ####
+de.coc.all = unique(d$de.coc.name)
+de.coc.selected = de.coc.all[7] # "HMIS Malaria – New Case (under 5)"
+
+# Nest data by orgUnit ,  de.coc.name 
+# NB: careful about frequency--don't want to mix monthly and weekly
+# NB: at present, only monthly values downloaded, so not an issue
+
+d.nest = d %>% 
+    complete( nesting(orgUnit, de.coc.name, period) ) %>%
+    mutate( value = as.integer( value ) ) %>%
+    group_by( level, feature, orgUnit ,  orgUnit.name , lat., long. , parent_ou.name ,  de.coc.name ) %>%
+    nest( period, value ) 
+    
+glimpse( d.nest )
+
+# model d.nest for selected element/catoegory: "HMIS Malaria – New Case (under 5)" ####
+x = d.nest %>% filter( de.coc.name %in% de.coc.selected )
+count( x, level )
+
+# tests...
+# df  = ts.ou( x[7, ] )
+# decompose.seas( df , verbose = TRUE  ) 
+# decompose.seas.coe( df , verbose = FALSE  ) 
+# decompose.stl( df   ) 
+# decompose.stl( df  , transform = "log" ) 
+
+x.dec = x %>% 
+    mutate( 
+        ts = map( data,   ~ts.df(.x)  ) ,
+        n = map_dbl( ts, ~sum( !is.na(.x) ) ) ,
+        total = map_dbl( ts , ~sum( .x, na.rm =  TRUE ))  
+            ) %>%
+    mutate( 
+        dec = map_dbl( ts, ~decompose.stl( .x , transform = "log", plot = FALSE )
+                   ) 
+        )
+
+count(x.dec, level )
+    
+summary( x.dec$dec  )
+
+
+max_dec = max( x.dec$dec, na.rm = TRUE )
+
+hist( x.dec$dec , breaks = seq( 0 , max_dec + .25 , .25 )  )
+
+# consider different groups, based on dec
+x.dec$quality = cut( x.dec$dec, breaks = c( 0, .5, 1 , 2, Inf) , labels = letters[1:4] )
+count( x.dec, quality )
+ggplot( x.dec ) + geom_histogram( aes( dec ), binwidth = .1 ) + facet_wrap( ~quality , scales = 'free')
+
+# plot dec by wt
+ggplot( x.dec ) + geom_point( aes( x = total, y = dec , color = factor(level) ), alpha = .3 )
+
+# EXAMOES ####
+# show example dec:  LOW 
+low_dec = which( x.dec$dec < .15 )
+length( low_dec )
+pick_one = sample( low_dec , 1 ) 
+sample_dec( index = pick_one , method = 'stl' )
+sample_dec( index = pick_one , method = 'seas' )
+sample_dec( index = pick_one , method = 'seas', smooth = TRUE , impute = TRUE )
+
+
+# show example dec:  MED 
+med_dec = which( x.dec$dec >  .15 & x.dec$dec < .75 )
+length( med_dec )
+pick_one = sample( med_dec , 1 ) 
+sample_dec( index = pick_one )
+
+
+# show example dec:  HIGH 
+high_dec = which( x.dec$dec > .75 )
+length( high_dec )
+pick_one = sample( high_dec , 1 ) 
+sample_dec( index = pick_one )
+
+# show example dec:  UNCONTROLLED 
+high_dec = which( x.dec$dec > 2 & x.dec$total > 100 )
+length( high_dec )
+pick_one = sample( high_dec , 1 ) 
+x.dec[ pick_one , ]$ts[[1]]
+sample_dec( index = pick_one  )
+sample_dec( index = pick_one , year = 2015  )
+sample_dec( index = pick_one , method = 'seas' )
+sample_dec( index = pick_one , method = 'seas' , year = 2015 )
+sample_dec( index = pick_one , method = 'seas',  impute = TRUE , zero_as_missing = TRUE )
+sample_dec( index = pick_one , method = 'seas',  impute = TRUE , zero_as_missing = TRUE , detect_outliers = TRUE)
+
+#### OUTLIERS #####
+library(tsoutliers)
+library( forecast )
+df = x.dec[ 574 , ]$ts[[1]]
+decompose.seas( df )
+scales::comma( sum( df , na.rm = TRUE ) )  # total with outlier
+
+fit = arima( df , order = c(0,1,1) , seasonal = list( order = c(0,1,1) ) )
+resid = residuals( fit )
+pars = coefs2poly(fit)
+coefs <- coef(fit)
+outliers = locate.outliers( resid, pars )
+outliers 
+res <- locate.outliers.oloop( df , fit, types = c( "AO")) # "AO", "LS", "TC"
+res$outliers
+discards = discard.outliers(res, df, method = "bottom-up", tsmethod.call = fit$call)$outliers$ind 
+df[ discards ] = NA 
+scales::comma( sum( df , na.rm = TRUE ) )  # total without outlier
+decompose.seas( df ,  impute = TRUE , zero_as_missing = TRUE )
+
+##### MISSING #####
+not_many = which( x.dec$n >27 & x.dec$n < 40 )
+df = x.dec[ not_many[1] , ]$ts[[1]]
+decompose.seas( df )
+scales::comma( sum( df , na.rm = TRUE ) )  # total with outlier
+decompose.seas( df ,  impute = TRUE , zero_as_missing = TRUE )
+
+# get start (a) and stop (b) times
+    time.min = map( x.dec$ts, ~time(.x) %>% as.Date() %>% min( na.rm = TRUE ) ) 
+    a = min(time.min[[1]]) 
+    time.max = map( x.dec$ts, ~time(.x) %>% as.Date() %>% max( na.rm = TRUE ) ) 
+    b = max(time.max[[1]]) 
+
+all.dates <- seq(  a , b , by="month")
+all.dates.frame <- ts(  rep( NA, length( all.dates) ), all.dates ) 
+
+
+
+
+# Summary by level ####
+
+x.dec %>% filter( quality %in% 'd' ) %>% .$dec %>% hist(. , breaks = seq( 0 , max( ., na.rm = TRUE ) + .25 , .25 ) )
+
+x.dec %>% group_by( level ) %>%
+    summarise(
+        wt.mean = weighted.mean( dec , total , na.rm = TRUE )
+    )
+
+
+
+
+
+# Try all elements... ####
+
+d.nest = d %>% 
+    complete( nesting(orgUnit, de.coc.name, period) ) %>%
+    mutate( value = as.integer( value ) ) %>%
+    group_by( level, feature, orgUnit ,  orgUnit.name , lat., long. , 
+              parent_ou.name ,  de.coc.name ) %>%
+    nest( period, value ) 
+
+glimpse( d.nest )
+
+pb <- progress_estimated( nrow(d.nest) )
+
+d.nest.dec = d.nest %>% 
+    mutate( 
+        ts = map( data,   ~ts.df(.x)  ) ,
+        n = map_dbl( ts, ~sum( !is.na(.x) ) ) ,
+        total = map_dbl( ts , ~sum( .x, na.rm =  TRUE ) )  
+    ) %>%
+    mutate( 
+        dec = map( ts, ~decompose.stl( .x , transform = "log", plot = FALSE, .pb = pb )  )
+        ) 
+
+# Summary by element 
+d.nest.dec %>% 
+    group_by( de.coc.name , level ) %>%
+    summarise(
+        n = n()  ,
+        wt.mean = weighted.mean( dec %>% unlist , total , na.rm = TRUE )  
+    ) %>% 
+    spread( level, wt.mean ) %>% View()
+
+
+# earlier versions ####
 
 # clinics submitting this data element
 d %>% 
-    filter( dataElement %in% de.id ) %>%
-    group_by(level) %>% summarise(unit = n_distinct(orgUnit))
+    filter( de.coc.name %in% de.coc.selected ) %>%
+    group_by(level) %>% 
+    summarise( unit = n_distinct(orgUnit)) %>%
+    inner_join( count( ous, level ) , by = "level")
 
+## number clinics by level
 
 # randmly select 1 lowest level orgunit with data
 l = which.max( count(d, level)$n )
