@@ -5,11 +5,11 @@ output: html_document
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Kenya
+  dhis_instance: Malawi
   data_directory:  
   output_directory: ./ # bug: only uses current directory
   output_format: html_document
-  create_new: FALSE 
+  create_new: TRUE 
   cache: FALSE
   echo: FALSE
 ---
@@ -18,7 +18,7 @@ params:
 ```{r package_list, message=FALSE, include= FALSE, warning= FALSE }
 
 # list of required packages
-    package.list = c( "openxlsx", "readxl" , "rlist", "knitr", "rmarkdown", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "broom" , "Hmisc", "plotly" , "skimr", "tidyverse" )
+    package.list = c( "openxlsx", "readxl" , "rlist", "knitr", "rmarkdown", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "broom" , "Hmisc", "plotly" , "skimr", "tidyverse" , 'knitrProgressBar' )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -104,7 +104,11 @@ login_origin = function(){
 
 # **`r toupper( params$dhis_instance )` **
 
-This script creates the review documents 
+This script creates the review documents by first downloading and cleaning some data from DHIS2.  Some of these steps require several minutes to an hour.  A progress bars will appear in the Rstudio console to indicate how long each process will take.  
+
+1. Download DHIS2 Metadata (~5-10 min)
+2. Test facility geocodes to see if they are in their respective administrative areas (~2-5 min)
+3. Query DHIS2 to determine number of time selected data elements were submitted (~10-90 min)
 
 ## Metadata
 

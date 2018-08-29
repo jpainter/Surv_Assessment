@@ -17,10 +17,9 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Kenya.demo 
+  dhis_instance: Nigeria
   data_directory: 
   output_directory: ./ # bug: only uses current directory
-  create_new: FALSE 
   cache: FALSE
   echo: FALSE
 ---
@@ -34,7 +33,8 @@ params:
 
 
 # list of required packages
-    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "geojsonR", "rmapshaper" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "readxl", "knitrProgressBar" , "tidyverse" )
+    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet",
+                     "geojsonR", "rmapshaper" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "tidyverse", "readxl" , "knitrProgressBar" )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -131,93 +131,7 @@ knitr::opts_chunk$set( echo = params$echo ,
 
 ## Metadata Structure
 
-```{r all_meta }
 
-  meta_data_file = paste0( origin.folder ,
-                           dhis_instance, 
-                           "_metadata.rds" ) 
-
-  if ( !file.exists( meta_data_file) ){
-   
-    # origin.login in to server
-    origin.login()
-  
-    url <- paste0( baseurl, "api/metadata.json" )
-        
-    md = get( url ) 
-    # View( md )
-    
-    # Alternative when API call returns error..
-    if ( names(md[1]) == "httpStatus" ){ 
-        
-        url = paste0( baseurl, "api" )
-        resources = get( url )[['resources']]
-        # View(resources)
-        n_resources = nrow( resources )
-        
-        get_resource_as_list = function( i ){
-            
-            print( paste( i , resources$plural[i] ) ) 
-            
-            # named list
-            url <- paste0(resources$href[i] , ".json?fields=:all&paging=false" )
-        
-            schema =  try( get( url ) , silent = TRUE )
-            
-            # NB: update so that tries up to 3 times...
-            
-            if ( !is.list( schema ) | schema[3]  %in% "ERROR"){
-                 return( data.frame( id = NA ) ) # exit if not a list
-            }
-            
-            s =  schema[[1]] 
-            # View( s )
-            return(s)
-        }
-        
-        # get_resource_as_list(i)
-    
-        md = map(1:n_resources, get_resource_as_list )
-        names( md ) = map_chr( 1:n_resources , ~resources$plural[.x] )
-        md = md[order(names(md))] #order alphebetically
-        # View( md )
-    }
-    
-    write_rds( md, meta_data_file )
-    
-  } else {
-      
-       md = read_rds( meta_data_file )
-  }
-
-  # re-order alaphabetically to be easier to browse in View
-  md = md[ order( names(md) ) ]
-  
-  # Get installed apps
-  apps_data_file = paste0( origin.folder ,
-                           dhis_instance, 
-                           "_apps.rds" ) 
-  
-   if ( !file.exists( apps_data_file) ){
-   
-        origin.login()
-    
-        # url<-paste0(baseurl,"api/appStore") # available apps ins store
-        url<-paste0(baseurl,"api/apps") # installed apps
-          
-        apps = get( url ) 
-          
-        write_rds( apps, apps_data_file )
-    
-  } else {
-      
-       apps = read_rds( apps_data_file )
-  }
-  
-  # Retrieve access data 
-  date_metadata = file.info( meta_data_file )$ctime 
-  
-```
 
 Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.    
 
@@ -397,296 +311,29 @@ NB : stratify by attributes such as private, public--if available
 
 ```
 
-## Map: Health facilities with number of confirmed malaria cases 
-
-
-## Geocodes
-
-```{r admins}
-
-
-# orgUnits that are polygons (likely admin), and open
-
- library( wellknown )
- library( geojsonio )
- library( sp )
-
-admins = md$organisationUnits %>% 
-    select( id, name, coordinates, openingDate, closedDate, path  ) %>%
-    as.tibble %>% 
-    mutate( 
-        feature_type = map_chr( coordinates, ~feature_type(.x) ) 
-        ) %>%
-    filter( feature_type %in% 'Polygon'  ) %>%
-    filter( !is.na(coordinates), is.na( closedDate ) )  %>%
-    mutate(
-        
-        level = map_int( path,
-                         ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
-            ) ,
-        
-        Year = year( ymd_hms( openingDate ) )  %>% ifelse( .<2014, 2014, .) ,
-        
-        coordinates = fix_coordinate_brackets( coordinates ) ,
-        
-        str_js = paste( 
-            '{ "type": "MultiPolygon", "coordinates": ' ,
-            coordinates , ' }' 
-            )
-        
-    ) %>%
-    as.tibble()
-
- library( geojsonio )
- library( rgdal )
- library(sp)
- library( geosphere )
-
- 
-    char_js. = map( admins$str_js, ~ FROM_GeoJson( .x ) ) 
- 
-    polys = map( 1:length(char_js.) , 
-                 ~map( .x, 
-                      ~map( char_js.[[.x]]$coordinates , Polygon ) 
-                 )[[1]]
-    )
-    
-    pgons = map( 1:length(polys),  
-                 ~ Polygons( polys[[.x]]  , as.character(.x)  ) )
-    spoly = SpatialPolygons( pgons )
-    proj4string( spoly ) = CRS("+proj=longlat +datum=WGS84")
-
-    admins$polygons = spoly
-    
-    # add centroids
-    admins$polygons = admins$polygons 
-
-    admins$centroids = geosphere::centroid( admins$polygons )
-    admins$long = admins$centroids[ , 1 ]
-    admins$lat = admins$centroids[ , 2 ]
-    
-    # plot( admins$polygons )
-
-# NB TODO: Give message for coordinates missing lat long
-```
-
-```{r cleangeoAdmins }
-
-# fixing holes and other issues.  added this simplify step to accomodate polygons with some geo-integrity problems (Nigeria)
-
-admins$polygons = rmapshaper::ms_simplify(admins$polygons ,keep = .99 )  
-
-```
-
-
-```{r clinics }
-# orgUnits that are points (likely HF), and open
-clinics = md$organisationUnits %>% 
-    select( id, name, coordinates, openingDate, closedDate, path  ) %>%
-    as.tibble %>% 
-    mutate( 
-        feature_type = map_chr( coordinates, ~feature_type(.x) ) ,
-        # remove quotation marks
-        coordinates = gsub('"', '', coordinates) ,
-        level = map_int( path,
-                         ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
-            ) ,
-        Year = year( ymd_hms( openingDate ) )  %>% ifelse( .<2014, 2014, .) 
-        ) %>%
-    filter( !feature_type %in% 'Polygon' ) %>%
-    separate( coordinates, c('long', 'lat'), sep = ',', remove = FALSE ) %>% 
-    # filter( !is.na(long), !is.na(lat), is.na( closedDate ) ) %>%
-    mutate(
-        long = as.numeric(  substr(  long, 2, nchar(long) ) ) ,
-        lat =  as.numeric(  substr(  lat, 1, nchar(lat)-1 )  ) 
-    ) 
-
-```
-
-_ for each non Admin orgUnit, 
-- if it is geocoded, check if it is within the admin it belongs to
-- if not geocoded, randomly assign geocode with admin it belongs to
-
-Step: find orgUnit with polygon data that it belongs to. Separate path and transform to long lorm
+## Administrative boundaries and facilities 
 
 ```{r}
 
-# Long form or clinics dataframe with row for each clinic-parent
-clinics. = clinics %>%
-    mutate( 
-        paths = map( path, ~str_split( .x,  "\\/"  ) ) 
-    ) %>% unnest( paths ) %>% unnest( paths ) %>%
-    rename( parent.id = paths ) %>%
-    group_by( id ) %>%
-    mutate(
-        parent.level = row_number() - 1
-    ) %>% 
-    ungroup() %>% 
-    
-    # join with admins
-    left_join( admins %>% 
-                    select( id, name ) %>% 
-                    rename( parent.name = name) , 
-                by = c( 'parent.id' = 'id' ) 
-                ) %>%
-    
-    filter( !is.na( parent.name ) )
 
-# clinics.$polygon = admins$polygons[ match( clinics.$parent.id , admins$id )]
+admins_file =  paste0( origin.folder , dhis_instance, "_admin_boundaries.rds" ) 
+admins = readRDS( admins_file)
 
 
+clinics_file =  paste0( origin.folder , dhis_instance, "_facilities.rds" ) 
+clinics = readRDS( clinics_file)
+
+
+facilities_file =  paste0( origin.folder , dhis_instance, "_updated_facilities.rds" ) 
+facilities = readRDS( facilities_file )
+
+     
+# imputed 
+count( facilities , has.coordinates, impute )
 
 ```
 
-
-- Check if clinic with coordinates is in parent 
-
-```{r clinicInParent }
-
- # c is data.frame of clinics with coordinates
- # c.fix, below, is a subset of c, listing clinics whose coordinates are not in a parent
- # c., farther below, is c updated from c.fix and c.impute
-
- facilities_file =  paste0( origin.folder , 
-                            dhis_instance,
-                            "_updated_facilities.rds" 
-                            ) 
- 
- if ( file.exists( facilities_file )  ){
-     
-     c = readRDS( facilities_file ) %>% 
-         select( 1:16 )
-         
- } else { 
-     
-     c = clinics.[1:200,] 
-     
-     nc = nrow(c)
-
-     pb <- progress_estimated( nc )
-     
-     
-     c = c %>% 
-         mutate(
-             in.parent = map2_lgl( id, parent.id , is.in.parent, .pb = pb )
-         )
-
-     c$has.coordinates = ifelse( is.na( c$lat ) | is.na( c$long ), FALSE, TRUE )
-    
-     count(c, has.coordinates , level , in.parent , parent.level ) %>% spread( parent.level, n )
-     
-     
-  
- }
- 
-```
-
-- Try fixing the ones that are not in parent
-
-```{r c.fix }
- 
- c.fix = c %>%
-     filter( has.coordinates  %in% TRUE, in.parent %in% FALSE ) 
-
- ncfix = nrow(c.fix)
- in.parent.fix = vector("list", length = ncfix ) 
- p <- progress_estimated(ncfix )
- 
- for ( i in 1:ncfix ){
-     
-        p$pause(0)$tick()$print()
-     
-        in.parent.fix[[i]] = map2_lgl( c.fix$id[i], 
-                                   c.fix$parent.id[i] , 
-                                   ~is.in.parent( .x, .y  , fix = TRUE )
-        )
- }        
- 
- c.fix$in.parent.fix = in.parent.fix %>% unlist   
-
-
- count(c.fix, level ,  in.parent.fix , parent.level ) %>% spread( parent.level, n )
-
- # Update c with c.fix
- c. = left_join( c, c.fix %>% select( id, parent.level, in.parent.fix ), 
-                by = c( 'id' , 'parent.level' ) 
-                ) %>%
-     mutate(
-         long. = ifelse( in.parent.fix %in% TRUE , lat, long ) ,
-         lat. = ifelse( in.parent.fix %in% TRUE , long , lat ) ,
-         long = long. ,
-         lat = lat.
-     ) %>%
-     select( -long., -lat. )
- 
-
-```
-
-- If coordinates are missing, or the clinic is not in its parent, then impute a location.
-
-```{r ImputeLocation }
-
-
- c.impute = c. %>% 
-    filter( 
-        !has.coordinates | (!in.parent & !in.parent.fix) , !is.na( parent.name )
-        ) %>%
-    group_by( id ) %>%
-    filter( row_number()==n() )  %>% # select last row
-    select( id, parent.id ) %>%
-    ungroup
- 
- 
- ncimpute = nrow( c.impute )
- impute.coords = vector("list", length = ncimpute ) 
- p <- progress_estimated( ncimpute )
- 
- for ( i in 1:ncimpute ){
-     
-        p$pause(0)$tick()$print()
-     
-        impute.coords[[i]] = impute.location(  c.impute$parent.id[i] ) 
-                                
- }        
- 
- c.impute$long.impute  = map_dbl( impute.coords , 1 ) 
- c.impute$lat.impute  = map_dbl( impute.coords , 2 ) 
- 
- # glimpse( c.impute )
-
- # Update c. with c.impute
- facilities = left_join( c., c.impute ,  by = c( 'id' , 'parent.id' )  ) %>%
-     group_by( id ) %>%
-     filter( row_number()==n() )  %>% # select last row
-     ungroup %>%
-     # use best available coordinates from c.fixed and c.impute 
-     mutate( 
-         lat. = ifelse( is.na( lat.impute ) , lat, lat.impute ) ,
-         long. = ifelse( is.na( long.impute ) , long, long.impute ) ,
-         impute = !is.na( long.impute )
-         )
- 
- # imputed 
- count( facilities, has.coordinates, impute )
- 
-```
-
-```{r save_facilities}
-
- # save 
-
- if ( file.exists( facilities_file ) & params$create_new ){
-     
-     file.rename( facilities_file , paste0( facilities_file , 
-                                            format(Sys.time(),
-                                                   "%b%d%Y")
-     ))
- } 
-                                        
- saveRDS( facilities , facilities_file )
- 
- 
-```
+## Map: Health facilities with number of confirmed malaria cases 
 
 - Number of orgunits per administrative area 
 
@@ -699,14 +346,20 @@ admins.count = admins %>% select( -polygons) %>%
     left_join( facilitiescount , by = c ( 'id' = 'parent.id' ) )  
 
 admins.count$polygons = admins$polygons
-admins.count$lat = centroid( admins$polygons )[, 2 ]
-admins.count$long = centroid( admins$polygons )[, 1 ]
+admins.count$lat = geosphere::centroid( admins$polygons )[, 2 ]
+admins.count$long = geosphere::centroid( admins$polygons )[, 1 ]
+
+```
+
+```{r cleangeoAdmins }
+
+
+admins$polygons = rmapshaper::ms_simplify(admins$polygons ,keep = .99 )  
 
 ```
 
 
 ```{r orgUnitMap}
-
 
     # pal = colorNumeric('OrRd', d$value.scale )
     binpal <- colorBin(
@@ -823,10 +476,9 @@ admins.count$long = centroid( admins$polygons )[, 1 ]
  orgUnitMap
  
 
-
 ```
 
-- Map of number of org units by admin level
+- NB: TODO Map of number of org units by admin level
 
 
 
@@ -1324,56 +976,6 @@ excluding 'yellow' and 'typhoid'
 
 # Number of facilities reporting each data element
 
-
-```{r de.all }
-
-  all.de = Reduce(  "|" , map( searches, eval_tidy  ) )
-  # sum( all.de )
-
-  de.mal = de[  eval_tidy( malaria_items) , display.vars ]
-
-  reported_data_file = paste0( origin.folder ,
-                           dhis_instance, 
-                           "_reported.rds" ) 
-  
-  
-  if ( file.exists( reported_data_file) ){
-    
-     d.reported =  readRDS( reported_data_file )
-     
-     d.reported.dataElements =  count( d.reported , dataElement ) %>% .$dataElement 
-     
-  } else {
-      
-      d.reported.dataElements = NULL 
-  }
-  
-  new.dataElements =  setdiff( de.mal$id[ order( de.mal$id )] , 
-                               d.reported.dataElements )
-
-  nde = length( new.dataElements)
-  
-  if ( nde > 0 ){
-
-        d.reported = api_last12months_national_data( 
-            
-            de.include = de[ all.de, ] ,
-            file = reported_data_file ,
-            details = TRUE 
-            )
-        
-
-        saveRDS( d.reported , reported_data_file )
-        
-  } 
-
-
- 
-
-```
-
-
-
 A list of variables was queried to see how many org units submitted data last year.  In total, there were `r sum( all.de )` variables queried. Of these, there were `r sum( !is.na(d.reported$value ) ) ` variables that were submitted by at least one org unit.  A listing of the variable can be found in the spreadsheet `r dhis_instance`_dataElements.xlsx.  
 
 
@@ -1853,7 +1455,7 @@ Count the org units assigned to each form, which is the basis for the number of 
 
 # Create table for each dataset
  for ( i in 1:nrow( mal.datasets ) ){
-   cat( dataset.ous.n( mal.datasets[i, 'Name'] , ous ) )
+   cat( dataset.ous.n( mal.datasets[i, 'Name'], ous ) )
  } 
  
   
@@ -1908,6 +1510,156 @@ Count the org units assigned to each form, which is the basis for the number of 
 - Save the sheet, then run the Data_Review.Rmd file to assess the data.  
 
 NB: Future versions should aspire to having a more elegant interface for selecting variables.
+
+```{r }
+# data frame of datasets and data elements
+  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
+            ~map_df( md$dataSets$dataSetElements[[.x]], 
+                     ~as.matrix(.x) )) %>%
+    rename( dataElement.id = dataElement , 
+            dataSet.id = dataSet ) %>%
+    left_join( md$dataElements %>% select( id, name ) ,
+               by = c('dataElement.id' = 'id' )) %>%
+    rename( dataElement = name ) %>%
+    left_join( md$dataSets %>% select( id, name ) ,
+               by = c('dataSet.id' = 'id' )) %>%
+    rename( dataSet = name )
+```
+
+
+```{r }
+
+open_ou =     md$organisationUnits %>% 
+    select( id, closedDate) %>%
+    filter( is.na(closedDate) ) %>%
+    select( id )
+
+n_facilities_assigned_to_datasets = md$dataSets %>%
+    select( id, organisationUnits) %>%
+    rename( dataSet.id = id ) %>% 
+    unnest( organisationUnits ) %>%
+    inner_join( open_ou , by = 'id' ) %>%
+    count( dataSet.id ) %>%
+    rename( n_facilities = n )
+    
+# number of options in each catgory combo
+
+options = md$categoryCombos %>% 
+    select( id, categories) %>% 
+    unnest( categories ) %>%
+    rename( categoryCombo = id , category = id1 ) %>%
+    inner_join( md$categories  %>% select( id, categoryOptions ), 
+                by = c('category' = 'id' )
+                ) %>%
+    unnest( categoryOptions ) %>% 
+    count( categoryCombo ) %>%
+    rename( n_options = n )
+
+
+# Select all malaria relevent variables
+malaria.groups = setdiff( names(searches) , c("TB", "imm", "HIV", "opd", "idp") )
+                            
+  all.possible.malaria.de = Reduce(  "|" , map( searches[ malaria.groups ], eval_tidy  ) )
+  # sum( all.possible.malaria.de )
+  
+de.selected = de[ all.possible.malaria.de , display.vars ] 
+
+
+d.mal.reported = d.reported[ , c("dataElement", "value")] %>% 
+    
+    rename( dataElement.id = dataElement ) %>%
+    
+    right_join( 
+        
+        de.selected %>% rename( dataElement = name ), 
+        
+        by = c("dataElement.id" = "id") 
+        
+        ) %>%
+    
+    left_join(
+        
+        options ,
+        
+        by = 'categoryCombo'
+        
+        ) %>%
+    
+   left_join( 
+       
+       dsde %>% select( dataElement.id , dataSet.id ) , 
+       
+       by = 'dataElement.id' 
+       
+       ) %>%
+    
+   left_join( 
+       
+       md$dataSets %>% select( id, name, periodType, timelyDays ) %>%
+           rename( dataSet = name ),
+       
+       by = c( 'dataSet.id' = 'id' )
+       
+       ) %>%
+    
+    left_join( 
+        
+        n_facilities_assigned_to_datasets , by = 'dataSet.id'
+        
+        ) %>%
+
+    mutate( 
+        
+        val = as.integer(value) 
+
+        , frequency = case_when(
+            periodType %in% "Weekly" ~ 52 ,
+            periodType %in% "Monthly" ~ 12 ,
+            periodType  %in% "Quarterly" ~ 4 ,
+            periodType  %in% "Yearly" ~ 1 ,
+            TRUE ~ 1
+        )
+            
+        , pVal = val / (frequency * n_facilities * n_options ) 
+
+            
+        ) %>% 
+    
+    mutate( 
+                Percent_Reported = sprintf("%1.2f%%", 100 * pVal ) 
+                ) 
+
+
+
+# If a data element linked to >1 dataSet, select the one with greatest number of facilities
+    d.mal.reported = d.mal.reported %>%
+        group_by( dataElement  ) %>%
+        arrange( -n_facilities  ) %>%
+        filter(  row_number() == 1 ) %>%
+        arrange( desc(pVal) ) 
+
+   datatable( d.mal.reported , filter = "top")
+```
+
+## suggested key data elements
+
+```{r}
+
+ de.key = d.mal.reported %>%
+    filter( pVal > .3 ) %>%
+    arrange( dataSet , dataElement ) %>%
+    select( dataSet , dataElement , periodType, 
+            n_facilities, Percent_Reported , categoryCombo )
+
+datatable( de.key )
+# View( de.key )
+
+write_rds( de.key,  paste0( origin.folder ,
+                           dhis_instance, 
+                           "_key_data_elements.rds" ) )
+```
+
+## spreadsheet of variables
 
 ```{r select_data_elements}
  
@@ -1990,17 +1742,12 @@ NB: Future versions should aspire to having a more elegant interface for selecti
                                             format(Sys.time(),
                                                    "%b%d%Y")
         ))
-    
+        
+        try( openxlsx::write.xlsx( l , de.review.xlsx ) )
     } 
-    
-    try( openxlsx::write.xlsx( l , de.review.xlsx ) )
-    
-    
     
     
 ```
-
-
 
 
 

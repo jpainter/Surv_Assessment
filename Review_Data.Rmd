@@ -10,7 +10,8 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Tanzania
+  dhis_instance: Sierra Leone Demo
+  create_new: TRUE 
   data_directory:  
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -22,8 +23,11 @@ params:
 
 ```{r packages, message=FALSE, include= FALSE, warning= FALSE }
 
+# # list of required packages
+#     package.list = c( "openxlsx", "readxl" , "rlist", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "broom" , "Hmisc", "plotly" , "skimr", "knitrProgressBar" , "tidyverse"  )
+
 # list of required packages
-    package.list = c( "openxlsx", "readxl" , "rlist", "knitr", "kableExtra", "xts", "leaflet", "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "zoo" , "broom" , "Hmisc", "plotly" , "skimr", "tidyverse" )
+    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "geojsonR", "rmapshaper" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "skimr" , "stringi", "rlang" , "tidyselect" , "readxl", "knitrProgressBar" , "tidyverse" )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -70,15 +74,14 @@ source('dhis2_functions.R')
   
  # login shortcuts
 
-login_origin = function(){
-    source( 
-    paste0( origin.folder, 
-            tolower( params$dhis_instance) , 
-            "_login" )
-    )
-
-  loginDHIS2( baseurl, username, password)
-}
+  # origin.login shortcut
+   origin.login = function(){
+       source( paste0( origin.folder , 
+                       tolower( dhis_instance ) , 
+                       "_login")  )
+       # print( baseurl )
+       loginDHIS2( baseurl, username, password)
+   }
   
 ```
 
@@ -89,21 +92,7 @@ login_origin = function(){
                            dhis_instance, 
                            "_metadata.rds" )
 
-  if ( !file.exists( meta_data_file) ){
-   
-    # login in to server
-    login_origin()
-  
-    md = metadataDHIS2( baseurl, 'all' )
-    
-    # glimpse( md )
-    
-    write_rds( md, meta_data_file )
-    
-  } else {
-      
-       md = read_rds( meta_data_file )
-  }
+    md = read_rds( meta_data_file )
 
   # re-order alaphabetically to be easier to browse in View
   md = md[order(names(md))]
@@ -119,26 +108,6 @@ Data from selected data will be downloaded for the period 2013-2017, from all or
 
 ```{r date_strings }
 
- # Function to create string of dates
-  date_code = function( years = 2013:2017 , months = 1:12 ){
-    period = character()
-    
-    for (year in years ){
-      for (month in seq_along(months)){
-        this_period = paste0( ";", 
-                         year , 
-                         ifelse( month < 10 , paste0("0", month) , month )
-        )
-        period =  c(period, this_period )
-      }
-    }
-    
-    # remove first ;
-    period =  paste( period, collapse = "")
-    period = substring( period, 2, nchar(period))
-    
-    return( period )
-  }
  
   periods = date_code() # default: 2013-2017
   # periods = date_code( 2017, 1 ) # January 2017 only
@@ -236,27 +205,28 @@ feature_type = function( coordinate ){
                              dhis_instance , "_" , 
                              "dataElements.xlsx" ) 
 
-    sheets = excel_sheets(de.review.xlsx)
+    sheets = excel_sheets(de.review.xlsx) 
+    
+    use_these_sheets = sheets %in% c( "malaria_stock", "stock", "pop", "attendance", "opd" ,
+                                      "ipd" , "malaria_items")
+    
+    target_sheets = sheets[ use_these_sheets ]  
     
     # get selected rows from every spreadsheet tab
-    de.include = map_df(  seq_along(sheets) , 
-                         ~readxl::read_xlsx( de.review.xlsx ,  sheet = .x ) %>% 
-        filter( !is.na(Include) ) %>% 
+    de.include = map_df(  seq_along( target_sheets ) , 
+                         ~readxl::read_xlsx( de.review.xlsx ,  sheet = target_sheets[.x] ) %>% 
+                             filter( !is.na(Include) ) ) %>%
+        
         distinct( dataElement.id, .keep_all = TRUE )
-    )
 
     # if none selected, pick intersection of malaria and confirmed 
     if ( nrow( de.include) == 0 ){
         
-        de.mal = readxl::read_xlsx( de.review.xlsx , sheet = 'mal' ) %>%
-            .$dataElement %>% unique
-        
-        de.conf = readxl::read_xlsx( de.review.xlsx , sheet = 'conf' ) %>%
-            .$dataElement %>% unique
-        
-        include = intersect( de.mal, de.conf)
-        
-        
+        de.include = read_rds( paste0( origin.folder ,
+                               dhis_instance, 
+                               "_key_data_elements.rds" ) 
+                            ) 
+            
     }
 
 ```
@@ -270,32 +240,40 @@ feature_type = function( coordinate ){
                      dhis_instance, 
                      "_dataset_totals.rds" )
 
-    if ( file.exists( data.totals.file ) ){
-        
-          data_totals = readRDS( data.totals.file ) 
-          
-# TODO: check for missing dates, then update 
-          
-    } else {
+    nde = length( de.include )
+
+    if ( nde > 0 & params$create_new ){
+    
+        data_totals = api_data( 
             
-        data_totals = api_data( periods = periods.vector , 
-                                levels = levels.vector , 
-                                de.vars = de.include ,
-                                file = "" ,
-                                details = FALSE , 
-                                submissions =  FALSE )
+            levels = levels.vector , 
+            de.vars = de.include ,
+            file = data.totals.file ,
+            details = FALSE , 
+            submissions =  FALSE )
         
         print( paste( "TOTAL:", 
                        scales::comma( nrow( data_totals ) ) , 
                        "records"  ) )
-
-        # save data
-        saveRDS( data_totals, data.totals.file )
- 
+    
+    } 
+    
+    if ( file.exists( data.totals.file ) & params$create_new ){
+        
+        file.rename( data.totals.file ,
+                     paste( data.totals.file ,
+                            format( Sys.time(), "%b%d%Y" )
+                            )
+                     )
     }
-
+    
+    if ( !file.exists( data.totals.file) ) saveRDS( data_totals , data.totals.file )
+    
+    data_totals = readRDS( data.totals.file )
+        
     # get date
-    data_totals_date = file.info(data.totals.file)$mtime
+    data_totals_date = file.info( data.totals.file )$mtime
+        
 
 ```
 
@@ -333,6 +311,7 @@ The totals data, `r scales::comma( nrow( data_totals ) )` records,  was download
 
 ## Describe data elements
 
+
 ```{r describe_totals}
 
    dt = data_totals %>%
@@ -350,28 +329,6 @@ The totals data, `r scales::comma( nrow( data_totals ) )` records,  was download
     
     
     skim( df )
-    
-    # glimpse(df) 
-    
- # html( describe( df ) ,  
- #       # condense=c('extremes', 'frequencies', 'both', 'none') ,
- #       size=100, 
- #       scroll=FALSE)
- 
- # p = plot( df )
- # htmltools::tagList( p )
- 
- # other histogram options...
- 
- # df. = map_df( colnames(df), ~filter(df, !.x==0 ) %>% mutate_if(is.numeric, log) )
- # 
- # with( df., histboxp(x= `105-1.3 OPD Malaria (Total)` , group = year, 
- #                     gmd = FALSE, sd=FALSE, bins = 2000)
- #       )
- # 
- # with( df., histboxp(x= .x , group = year, 
- #                     gmd = FALSE, sd=FALSE, bins = 2000)
- #       )
  
 ```
 
@@ -387,30 +344,45 @@ The totals data, `r scales::comma( nrow( data_totals ) )` records,  was download
                      dhis_instance, 
                      "_dataset_details.rds" )
 
-    if ( file.exists( data.details.file ) ){
-        
-          data_details = readRDS( data.details.file ) 
-          
-# TODO: check for missing dates, then update 
-          # - make fetch into a function usable for details, details, and datasets...
-                                
-          
-    } else {
-            
-        data_details = api_data( periods = periods.vector , 
-                                levels = levels.vector , 
-                                de.vars = de.include ,
-                                file = "" ,
-                                details = TRUE , 
-                                submissions =  FALSE )
-        
-        # save data
-        saveRDS( data_details, data.details.file )
- 
-    }
+    nde = length( de.include )
 
+    if ( nde > 0 & params$create_new ){
+            
+        data_details = api_data( 
+            
+            periods = periods.vector , 
+            levels = levels.vector , 
+            de.vars = de.include ,
+            file = data.details.file ,
+            details = TRUE , 
+            submissions =  FALSE 
+            
+            )
+        
+        print( paste( "TOTAL:", 
+                  scales::comma( nrow( data_details ) ) , 
+                  "records"  ) )
+    
+    }
+    
+    if ( file.exists( data.details.file ) & params$create_new ){
+        
+        file.rename( data.details.file ,
+                     paste( data.details.file ,
+                            format( Sys.time(), "%b%d%Y" )
+                            )
+                     )
+    }
+    
+    if ( !file.exists( data.details.file) ) saveRDS( data_details , data.details.file )
+    
+    
+    data_details = readRDS( data.details.file )   
+    
+    
     # get date
     data_details_date = file.info( data.details.file )$mtime
+        
 
 ```
 
@@ -431,12 +403,16 @@ Summarise data details values by dataElement_categoryOptionCombo
 
     # spread data so that each column is a variable; keep only numeric cols
     df = dd %>% 
+        group_by( level ) %>%
         # select( orgUnit, period,  element_combo, value ) %>%
         mutate( value = as.numeric( value )) %>%
         spread( element_combo, value  ) %>%
         purrr::keep(is.numeric)
     
     skim( df )
+    
+    stw = skim_to_wide( df %>% filter( level == 4 ) ) 
+    datatable( stw )
     
     # # glimpse(df) 
     # 
@@ -661,7 +637,7 @@ Table of number of org units that provided data for each data element, stratifie
 ```{r Submission_de_Totals }
 
 
- d = data_totals  %>% 
+ d = data_totals  %>% select( -level ) %>%
     
     # Remove any rows with all missing data
     filter( complete.cases(.) ) %>%
@@ -779,7 +755,7 @@ Completeness by element, level:
 
 ```{r Submission_de_details }
 
-    s = data_totals %>%
+    s = data_totals %>% select( -level ) %>%
         left_join(  ous %>% select( id, level, level.name ) , 
                     by = c('orgUnit' = 'id') ) %>%
         count( dataElement , level, level.name , period ) %>% 
@@ -860,6 +836,98 @@ This section will be to identify extreme values that are most likely data entry 
 Detect outliers/anomalies:  
 - WHO Outilier detection
 - Anomallize
+
+# Population and Attendance 
+## Population
+
+```{r population, eval=FALSE }
+
+
+    data.populations.file = paste0( origin.folder , 
+                     dhis_instance, 
+                     "_poulations.rds" )
+
+    if ( file.exists( data.populations.file ) ){
+        
+          data_poulations = readRDS( data.populations.file ) 
+          
+# TODO: check for missing dates, then update 
+          # - make fetch into a function usable for details, details, and datasets...
+                                
+          
+    } else {
+        
+    # get selected rows from every spreadsheet tab
+    de.include = map_df(  seq_along(sheets) , 
+                         ~readxl::read_xlsx( de.review.xlsx ,  sheet = .x ) %>% 
+        filter( !is.na(Include) ) %>% 
+        distinct( dataElement.id, .keep_all = TRUE )
+    )
+
+    # if none selected, pick intersection of malaria and confirmed 
+    if ( nrow( de.include) == 0 ){
+        
+        de.include = read_rds( paste0( origin.folder ,
+                               dhis_instance, 
+                               "_key_data_elements.rds" ) 
+                            ) 
+            
+    }
+            
+        data_populations = api_data( periods = periods.vector , 
+                                levels = levels.vector , 
+                                de.vars = de.include ,
+                                file = "" ,
+                                details = TRUE , 
+                                submissions =  FALSE )
+        
+        # save data
+        write_rds( data_populations, data.populations.file )
+ 
+    }
+
+    # get date
+    data_populations_date = file.info( data.populations.file )$mtime
+
+```
+
+## Attendance
+
+
+```{r attendance , eval=FALSE }
+
+    data.attendances.file = paste0( origin.folder , 
+                     dhis_instance, 
+                     "_attendances.rds" )
+
+    if ( file.exists( data.attendances.file ) ){
+        
+          data_poulations = readRDS( data.attendances.file ) 
+          
+# TODO: check for missing dates, then update 
+          # - make fetch into a function usable for details, details, and datasets...
+                                
+          
+    } else {
+        
+        de.include =     
+        
+        data_attendances = api_data( periods = periods.vector , 
+                                levels = levels.vector , 
+                                de.vars = de.include ,
+                                file = "" ,
+                                details = TRUE , 
+                                submissions =  FALSE )
+        
+        # save data
+        write_rds( data_attendances, data.attendances.file )
+ 
+    }
+
+    # get date
+    data_attendances_date = file.info( data.attendances.file )$mtime
+```
+
 
 # Field visits
 
