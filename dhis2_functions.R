@@ -594,6 +594,7 @@ get_resources = function( i , .pb = pb){
                       levels = NA , 
                       de.vars = NA , # a data.frame like _key_data_elements.rds
                       file = "" ,
+                      dsde = NULL , 
                       details = FALSE , 
                       submissions =  FALSE 
  ){
@@ -636,11 +637,13 @@ get_resources = function( i , .pb = pb){
          dataElements = de.vars 
      }
      
-     dataElement.ids =  de.vars$dataElement.id
-     dataElement.names = de.vars$dataElement
+     # dataElement.ids =  de.vars$dataElement.id
+     # dataElement.names = de.vars$dataElement
        
      
      if ( submissions ){ # substitute dataSet associated with dataElement
+         
+         stopifnot( !is.null( dsde) )
          
          # get datasets associated with data_totals dataElements
          dataElements =  data_totals %>% 
@@ -652,8 +655,7 @@ get_resources = function( i , .pb = pb){
              rename( id = dataSet ) %>%
              left_join( md$dataSets %>% select( name, id ), 
                         by = "id" 
-             ) %>%
-             .$name
+             ) 
      }
      
      stopifnot( origin.login()  )
@@ -662,7 +664,7 @@ get_resources = function( i , .pb = pb){
      
      ##### cycle through each period, each data element...
      
-     ndei = nrow( de.vars ) * length( periods )
+     ndei = nrow( dataElements ) * length( periods )
      pb <- progress_estimated( ndei )
      
      data = list()
@@ -671,16 +673,16 @@ get_resources = function( i , .pb = pb){
      data  = vector(mode = "list", 
                     length = length( periods ) )
      
-     for ( period in seq_along( periods.vector ) ){
+     for ( period in seq_along( periods ) ){
 
          data.de = list()
          
          # todo: allocate size of list :
          data.de = vector(mode = "list", 
-                          length = length( dataElement.ids )
+                          length = length( dataElements$id )
                           )
          
-         for ( element in  seq_along( dataElement.ids ) ){
+         for ( element in  seq_along( dataElements$id ) ){
              
              update_progress(pb) 
     
@@ -688,7 +690,7 @@ get_resources = function( i , .pb = pb){
              if ( exists( "existing.data" ) ){
                  
                  in.period =existing.data$period %in% periods[ period ] 
-                 in.element = existing.data$dataElement %in% dataElement.ids[ element ] 
+                 in.element = existing.data$dataElement %in% dataElements$id[ element ] 
  
                  existing.value = existing.data[ in.period & in.element , ]
                  
@@ -701,23 +703,22 @@ get_resources = function( i , .pb = pb){
              }
              
              
+             de.ids = dataElements$id[ element ]
+             
              if ( submissions ){
                  
                  reports = c( 'ACTUAL_REPORTS', 'ACTUAL_REPORTS_ON_TIME', 'EXPECTED_REPORTS' )
                  # get ids
-                 de.ids = md$dataSets %>% 
-                         select( id, name ) %>%
-                         filter( name %in% dataElements[ element ] ) %>%
-                         .$id 
+                 de.ids = dataElements[ element , ]$id 
                  
-                 # add report types
+                 # concatenate with report types
                  de.ids = paste0( de.ids, ".", reports , collapse = ';')
              }
              
              
              if ( details ){
                  
-                 de.index = which( md$dataElements$id %in% dataElement.ids[ element ] )
+                 de.index = which( md$dataElements$id %in% dataElements$id[ element ] )
                  
                  # data.frame of dataElement-id and categorycomb0-id
                  de.catCombo = data_frame( 
@@ -742,21 +743,20 @@ get_resources = function( i , .pb = pb){
                                           collapse  = ";" )
                  
                  print( paste( periods[ period ], "Element" , element ,
-                               "/" , length( dataElement.ids ) ,
-                               ":" , dataElement.names[ element ],
+                               "/" , length( dataElements$id ) ,
+                               ":" , dataElements$name[ element ],
                                ":" , nrow( de.catOptCombo ) , "categories" 
                  )
                  )
                  
-             } else {
-                 
-                 de.ids = dataElement.ids[ element ]
-                 
-                 print( paste( periods[ period ], "Element" , element ,
-                               "/" , length( dataElement.ids ) ,
-                               ":" , dataElement.names[ element ])
-                 )
              }
+ 
+                 
+            print( paste( periods[ period ], "Element" , element ,
+                               "/" , length( dataElements$id ) ,
+                               ":" , dataElements$name[ element ])
+                 )
+
              
              data.level = list()
              
@@ -787,7 +787,7 @@ get_resources = function( i , .pb = pb){
                  
                  
                  # Fetch data
-                 fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+                 fetch <- retry( get(url, .print = FALSE )[[1]] ) # if time-out or other error, will retry 
                  
                  # if returns a data frame of values (e.g. not 'server error'), then keep
                  if ( is.data.frame( fetch ) ){ 
@@ -817,9 +817,9 @@ get_resources = function( i , .pb = pb){
          # combine data
          data[[ period ]] = data.table::rbindlist( data.de , fill = TRUE )
          
-         print( paste( "/n Period" , periods.vector[period]  , "has", 
+         print( paste( "...Period" , periods[period]  , "has", 
                        scales::comma( nrow( data[[period]] ) ) , 
-                       "records /n"  ) )
+                       "records."  ) )
          
      }
      
@@ -830,7 +830,7 @@ get_resources = function( i , .pb = pb){
                    scales::comma( nrow( d ) ), 
                    "records"  ) )
      
-     if (!exists( "existing.data") )  existing.data = data[0, ]
+     if (!exists( "existing.data") )  existing.data = d[0, ]
      
      data = bind_rows( 
          existing.data %>% filter( !is.na(value) )
@@ -950,7 +950,7 @@ get_resources = function( i , .pb = pb){
              }
              
              # Fetch data
-             fetch <- retry( get(url)[[1]] ) # if time-out or other error, will retry 
+             fetch <- retry( get(url, .print = FALSE)[[1]] ) # if time-out or other error, will retry 
              
              # if returns a data frame of values (e.g. not 'server error'), then keep
              if ( is.data.frame( fetch ) ){ 

@@ -17,7 +17,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Nigeria
+  dhis_instance: Sierra Leone Demo
   data_directory: 
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -131,6 +131,18 @@ knitr::opts_chunk$set( echo = params$echo ,
 
 ## Metadata Structure
 
+```{r}
+
+  meta_data_file = paste0( origin.folder ,
+                           dhis_instance, 
+                           "_metadata.rds" ) 
+
+    md = read_rds( meta_data_file )
+
+# Retrieve access data 
+  date_metadata = file.info( meta_data_file )$ctime 
+
+```
 
 
 Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.    
@@ -147,7 +159,7 @@ Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `*
 
 ```{r attribute_numbers }
 
- metadata_attributes = map_df( md[names(md)], ~length(.x$id) ) %>% 
+ metadata_attributes = map_df( md[names(md)], length ) %>% 
     gather( attribute, value ) %>% # columns to rows
     mutate( value = comma( value ) )   # format numbers
     
@@ -166,7 +178,8 @@ Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `*
 
 z = lapply( md , function(x) x = x[[1]] )
 
-listviewer::jsonedit( z )
+listviewer::jsonedit( md )
+
 ```
 
 

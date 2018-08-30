@@ -5,11 +5,11 @@ output: html_document
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance:  Sierra Leone Demo
+  dhis_instance: Malawi
   data_directory:  
   output_directory: ./ # bug: only uses current directory
   output_format: html_document
-  create_new: TRUE 
+  create_new: FALSE 
   cache: FALSE
   echo: FALSE
 ---
@@ -691,7 +691,18 @@ if ( !exists( "facilities" ) ){
                              output.suffix
                              ) 
 
-    if ( !file.exists( output.filename ) | params$create_new ) { 
+    # rename if exists
+    if ( file.exists( output.filename ) ){
+        
+            file.rename( output.filename , 
+                    paste0( output.filename ,
+                            paste( output.filename ,
+                            format( Sys.time(), "%b%d%Y" )
+                            )))
+   }
+
+    # create new
+    if ( !file.exists( output.filename )  ) { 
 
         rmarkdown::render( 'Display_Metadata.Rmd' ,
                            
@@ -734,7 +745,17 @@ if ( !exists( "facilities" ) ){
                              output.suffix
                              ) 
 
-    if ( !file.exists( output.filename ) | params$create_new ) { 
+    if ( file.exists( output.filename ) ){
+        
+            file.rename( output.filename , 
+                    paste0( output.filename ,
+                            format( Sys.time(), "%b%d%Y" ) 
+                    )
+                    )
+   }
+
+
+    if ( !file.exists( output.filename ) ) { 
 
         rmarkdown::render( 'Review_Data.Rmd' ,
                            
@@ -748,6 +769,7 @@ if ( !exists( "facilities" ) ){
          
     }
 
+   # open file
    if ( file.exists( output.filename )) browseURL( output.filename ) 
 
 ```

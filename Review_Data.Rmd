@@ -11,7 +11,7 @@ editor_options:
   chunk_output_type: console
 params:
   dhis_instance: Sierra Leone Demo
-  create_new: TRUE 
+  create_new: FALSE 
   data_directory:  
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -92,7 +92,7 @@ source('dhis2_functions.R')
                            dhis_instance, 
                            "_metadata.rds" )
 
-    md = read_rds( meta_data_file )
+  md = read_rds( meta_data_file )
 
   # re-order alaphabetically to be easier to browse in View
   md = md[order(names(md))]
@@ -242,7 +242,7 @@ feature_type = function( coordinate ){
 
     nde = length( de.include )
 
-    if ( nde > 0 & params$create_new ){
+    if ( nde > 0 & params$create_new | !file.exists( data.totals.file ) ){
     
         data_totals = api_data( 
             
@@ -256,7 +256,10 @@ feature_type = function( coordinate ){
                        scales::comma( nrow( data_totals ) ) , 
                        "records"  ) )
     
-    } 
+    } else {
+        
+        data_totals = readRDS( data.totals.file )
+    }
     
     if ( file.exists( data.totals.file ) & params$create_new ){
         
@@ -268,8 +271,6 @@ feature_type = function( coordinate ){
     }
     
     if ( !file.exists( data.totals.file) ) saveRDS( data_totals , data.totals.file )
-    
-    data_totals = readRDS( data.totals.file )
         
     # get date
     data_totals_date = file.info( data.totals.file )$mtime
@@ -346,7 +347,7 @@ The totals data, `r scales::comma( nrow( data_totals ) )` records,  was download
 
     nde = length( de.include )
 
-    if ( nde > 0 & params$create_new ){
+    if ( nde > 0 & params$create_new | !file.exists( data.details.file )  ){
             
         data_details = api_data( 
             
@@ -537,13 +538,7 @@ Why are some totals > than sum of details/categories? (only evaluate if there is
 ```
 
 
-
-
-# Data Completeness {.tabset .tabset-fade}
-
-## Dataset Submission 
-
-Values shown are for the periods from `r min(periods.vector)` to `r max(periods.vector)`.
+## DataSet - DataElement List 
 
 ```{r dsde }
 
@@ -592,97 +587,72 @@ Values shown are for the periods from `r min(periods.vector)` to `r max(periods.
 ```
 
 
-```{r dataset_submissions }
+# Data Completeness {.tabset .tabset-fade}
+
+Values shown are for the periods from `r min(periods.vector)` to `r max(periods.vector)`.
+
+
+```{r download_dataset_submissions }
 ## DataElements : details 
 
   dataset.submission.file = paste0( origin.folder , 
                      dhis_instance ,  
                      "_dataset_submissions.rds" )
 
-    if ( file.exists( dataset.submission.file ) ){
-        
-          data_submissions = readRDS( dataset.submission.file ) 
-          
-# TODO: check for missing dates, then update 
-          # - make fetch into a function usable for details, details, and datasets...
-                                
-          
-    } else {
+    if ( !file.exists( dataset.submission.file ) | params$create_new ){
             
         data_submissions = api_data( periods = periods.vector , 
                                 levels = levels.vector , 
                                 de.vars = de.include ,
-                                file = "" ,
+                                file = dataset.submission.file ,
+                                dsde = dsde ,
                                 details = FALSE , 
                                 submissions =  TRUE )
         
-        # save data
-        saveRDS( data_submissions, dataset.submission.file )
- 
+    } else {
+        
+        data_submissions = readRDS( dataset.submission.file ) 
+        
+    }         
+          
+    
+   # Rename existing file
+   if ( file.exists( dataset.submission.file ) & params$create_new ){
+        
+        file.rename( dataset.submission.file ,
+                     paste( dataset.submission.file ,
+                            format( Sys.time(), "%b%d%Y" )
+                            )
+                     )
     }
+    
+    # save new
+    if ( !file.exists( dataset.submission.file) ) saveRDS( data_submissions , dataset.submission.file )
 
     # get date
     data_submissions_date = file.info( dataset.submission.file )$mtime
 
 ```
 
-## Submissions by OrgUnit Level
 
-- Dataset 'completeness' (better described as submission)
+## Dataset 'Completeness' (form submission rate) 
+
+- Dataset 'completeness', better described as form submission rate because it indicates the number of facilties that submitted a report, regardless of th completeness of the report.   
 
 Table of number of org units that provided data for each data element, stratified by dataset (row headings) and orgUnit level (column headings).  
 
 <!-- What would be really cool--to show number of orgunits available, assigned to dataset, and actually submitted data for each dataset/data element. -->
 
-```{r Submission_de_Totals }
-
-
- d = data_totals  %>% select( -level ) %>%
-    
-    # Remove any rows with all missing data
-    filter( complete.cases(.) ) %>%
-    
-    # get ou level 
-    left_join(
-        select( ous , id, level ) , 
-        by = c('orgUnit' = 'id')
-    ) %>% 
-    
-    # join dataset to dataElement
-    left_join( dsde, by = 'dataElement' ) %>%
-    group_by( dataSet, dataElement , level ) %>%
-    summarise( n = n_distinct( orgUnit ) )   %>%
-    ungroup %>%
-     
-    #dataset name
-    rename( id = dataSet ) %>%
-    left_join( md$dataSets %>% select( id, name ) ,  by = 'id'  ) %>%
-    rename( dataSet = name ) %>%
-    select( -id ) %>%
-     
-    # data element name
-    rename( id  = dataElement ) %>%
-    left_join( md$dataElements %>% select( id, name ) , by = 'id' ) %>%
-    rename( dataElement = name ) %>%
-    select( -id ) %>%
-     
-    spread( level, n ) 
- 
- kable( d, 'html' ) %>% 
-       kable_styling(bootstrap_options = c("striped", "hover") ) %>%
-        column_spec(1, bold = T) 
-```
-
 ```{r dataset_completeness }
   
-  d.ous = data_submissions %>% 
+  d.ous = data_submissions %>% select( -level ) %>%
         separate( col = dataElement , 
                   into = c('dataSet', 'Category' ), 
                   sep = "\\.") %>%
         inner_join( md$dataSets %>% select( id, name ) , 
                     by = c( 'dataSet' = 'id') ) %>% 
         rename( dataSet = name , dataSet.id = dataSet) %>% 
-        inner_join( ous %>% select( ous, parent, level , level.name , feature, id ), 
+        inner_join( ous %>% select( ous, parent, level, level.name , feature, id ), 
                     by = c( 'orgUnit' = 'id' ) 
                         ) 
     
@@ -747,9 +717,7 @@ if ( s %>% filter( !Category %in% "EXPECTED_REPORTS" ) %>% nrow > 0 ){
 ```
 
 
-## Data element completeness
-
-Completeness by element, level: 
+## Percent completeness by Data Element
 
 - crude measure with denom = all orgunits
 
@@ -784,9 +752,7 @@ Completeness by element, level:
 
 Subset to organizational unit levels with at least 20 expected reports
 
-```{r submission_charts}
-
-
+```{r de_completeness_charts}
 
 # percent completeness 
     ggplot(s %>% filter(expected >=20 ),  aes(x = date, y = completeness, 
@@ -803,7 +769,12 @@ Subset to organizational unit levels with at least 20 expected reports
     scale_y_continuous(labels = scales::percent)
     
     # ggplotly( g )
+    
+```
 
+## Actual Number Reports by Data Element
+
+```{r}
 # Actual number
     ggplot(s %>% filter(expected >=20 ),  aes(x = date, y = reported, 
                    group = level.name , color = level.name )) +
@@ -816,9 +787,50 @@ Subset to organizational unit levels with at least 20 expected reports
              subtitle =  '' ,
              caption = params$origin_login_file
              ) 
-    
 ```
 
+## Reported dataElement by dataSet, level
+
+```{r Submission_de_Totals }
+
+
+ d = data_totals  %>% select( -level ) %>%
+    
+    # Remove any rows with all missing data
+    filter( complete.cases(.) ) %>%
+    
+    # get ou level 
+    left_join(
+        select( ous , id, level ) , 
+        by = c('orgUnit' = 'id')
+    ) %>% 
+    
+    # join dataset to dataElement
+    left_join( dsde, by = 'dataElement' ) %>%
+    
+    # Summarize by element and level--all dates
+    group_by( dataSet, dataElement , level ) %>%
+    summarise( n = n_distinct( orgUnit ) )   %>%
+    ungroup %>%
+     
+    #dataset name
+    rename( id = dataSet ) %>%
+    left_join( md$dataSets %>% select( id, name ) ,  by = 'id'  ) %>%
+    rename( dataSet = name ) %>%
+    select( -id ) %>%
+     
+    # data element name
+    rename( id  = dataElement ) %>%
+    left_join( md$dataElements %>% select( id, name ) , by = 'id' ) %>%
+    rename( dataElement = name ) %>%
+    select( -id ) %>%
+     
+    spread( level, n ) 
+ 
+ kable( d, 'html' ) %>% 
+       kable_styling(bootstrap_options = c("striped", "hover") ) %>%
+        column_spec(1, bold = T) 
+```
 
 - Summarise org units open each period
 
