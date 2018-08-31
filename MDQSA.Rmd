@@ -2,7 +2,7 @@
 title: "DHIS_Review"
 date: "April 6, 2018"
 output: html_document
-always_allow_html: yes
+
 editor_options: 
   chunk_output_type: console
 params:
@@ -28,14 +28,16 @@ params:
         if ( length( missing.packages ) > 0 ) install.packages( missing.packages ) 
     }
 
-
 # Test if packages loaded
     pkgTest( package.list )
 
 # load the packages
     lapply( package.list, suppressMessages( require ) , character.only = TRUE)
 
-
+# To render htmo in word doc: https://bookdown.org/yihui/bookdown/html-widgets.html
+    # install.packages("webshot")
+    # webshot::install_phantomjs()
+    
 # load accessory functions
 source('dhis2_functions.R')
 
@@ -700,10 +702,12 @@ if ( !exists( "facilities" ) ){
     if ( file.exists( output.filename ) ){
         
             file.rename( output.filename , 
-                    paste0( output.filename ,
-                            paste( output.filename ,
+                    paste0( output.filename , 
+                            paste0( "." ,
                             format( Sys.time(), "%b%d%Y" )
-                            )))
+                            )
+                            )
+                    )
    }
 
     # create new
@@ -767,7 +771,7 @@ if ( !exists( "facilities" ) ){
 
         rmarkdown::render( 'Review_Data.Rmd' ,
                            
-           output_file = paste0( output.filename , ".doc" ),
+           output_file = paste0( output.filename  ),
            output_format = output_format ,
            # 'knitrBootstrap::bootstrap_document' ,
            params = params.list ,

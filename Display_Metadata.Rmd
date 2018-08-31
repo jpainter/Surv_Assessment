@@ -1,7 +1,7 @@
-<<<<<<< HEAD
 ---
 title: DHIS2 Metadata
 output:
+
   html_document:
     css: custom.css
     toc: true
@@ -10,15 +10,22 @@ output:
     fig_caption: yes
     self_contained: yes
     # template: html_template.html 
-  pdf_document:
-    fig_caption: yes
+    
   word_document: 
     toc: true
     fig_caption: yes
+    
+    
+  pdf_document:
+    fig_caption: yes
+    
+always_allow_html: yes
+
 editor_options: 
   chunk_output_type: console
+  
 params:
-  dhis_instance: Sierra Leone Demo
+  dhis_instance: Malawi
   data_directory: 
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -34,7 +41,7 @@ params:
 
 
 # list of required packages
-    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet",
+    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "pander" ,
                      "geojsonR", "rmapshaper" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "tidyverse", "readxl" , "knitrProgressBar" )
 
 # Function to test if package is installed 
@@ -166,10 +173,11 @@ Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `*
     
 
   metadata_attributes %>%
-      kable( align = c( 'l', 'r' ), 'html' ) %>% 
-      kable_styling( bootstrap_options = c("striped", "hover") ) %>%
-        column_spec(1, bold = T) %>%
-      scroll_box(height = "500px")
+      pander( align = c( 'l', 'r' )  ) 
+  # %>% 
+  #     pander_styling(  bootstrap_options = c("striped", "hover") ) %>%
+  #       column_spec(1, bold = T) %>%
+  #     scroll_box(height = "500px")
 
 ```
 
@@ -255,11 +263,12 @@ There are `r  md$organisationUnits %>% nrow %>% comma()` organisation units in `
                             ousFeatures, by = 'level' ) %>%
       mutate( n = comma(n) ) 
     
-  kable( feature_table, align = c( 'l', 'l', 'r' ) ,
-         'html' ,
-                caption = paste("Organisational Unit Levels" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")
-                              ) 
+  pander( feature_table, align = c( 'l', 'l', 'r' ) ,
+         # 'html' ,
+                caption = paste("Organisational Unit Levels" ) )
+  # %>%
+  #               pander_styling( # bootstrap_options = c("striped", "hover")
+  #                             ) 
 
 ```
 
@@ -273,13 +282,15 @@ ungeo = ous %>%
     select( level, parent_ou.name, orgUnit.name )
 
 
-  kable( ungeo, 
-         'html' ,
+  pander( ungeo, 
+         # 'html' ,
          caption = paste("Organisational Units By Year" ) 
-         ) %>%
-      kable_styling(
-          bootstrap_options = c("striped", "hover")
-          ) 
+         )
+  
+  # %>%
+  #     pander_styling(
+  #          # bootstrap_options = c("striped", "hover")
+  #         ) 
   
 ```
 
@@ -316,11 +327,12 @@ NB : stratify by attributes such as private, public--if available
 
 # but some are recent
 
-  kable( t , 
-         'html' ,
-                caption = paste("Organisational Units By Year" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")
-                              ) 
+  pander( t , 
+         # 'html' ,
+                caption = paste("Organisational Units By Year" ) ) 
+  # %>%
+  #               pander_styling(  bootstrap_options = c("striped", "hover")
+                              # ) 
 
 
 ```
@@ -669,11 +681,12 @@ repeated.ou.names = ous %>% count( level, orgUnit.name ) %>%
 
     if( nrow( repeated.ou.names ) > 0 ){
           
-          kable( repeated.ou.names, 
-                 'html' ,
-                caption = paste("Organisational Units By Year" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")
-                              ) 
+          pander( repeated.ou.names, 
+                 # 'html' ,
+                caption = paste("Organisational Units By Year" ) ) 
+        # %>%
+        #         pander_styling( bootstrap_options = c("striped", "hover")
+        #                       ) 
       } else {
           print( "No names are repeated." )
       }
@@ -692,11 +705,12 @@ duplicated.ou.ids = ous %>% count( level, orgUnit.name , id ) %>%
 
     if( nrow( duplicated.ou.ids ) > 0 ){
           
-          kable( duplicated.ou.ids, 
-                 'html' ,
-                caption = paste("Organisational Units By Year" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")
-                              ) 
+          pander( duplicated.ou.ids, 
+                 # 'html' ,
+                caption = paste("Organisational Units By Year" ) ) 
+        # %>%
+        #         pander_styling( # bootstrap_options = c("striped", "hover")
+        #                       ) 
       } else {
           print( "No ids are repeated." )
       }
@@ -797,7 +811,7 @@ There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help ident
                     Count = sum( eval_tidy( searches[[.x]] ) )
     ))
     
-    kable( search , row.names = FALSE)
+    pander( search , row.names = FALSE)
 
 ```
 
@@ -811,7 +825,7 @@ There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help ident
     display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
                                  'categoryCombo', 'id' )
 
-    de.list = function( filter, kable = TRUE ){   
+    de.list = function( filter, pander = TRUE ){   
     
         filter = eval_tidy( filter )
         
@@ -838,16 +852,18 @@ There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help ident
                 by = 'id'
                 )  
             
-        if (kable){ 
-            kable(
+        if (pander){ 
+            pander(
                 select( de.filter , 
                         name, Group, zeroIsSignificant, lastUpdated, categoryCombo
                         ) %>%
                     rename( dataElement = name ) %>%
                     arrange( Group , dataElement), 
-                   'html' ,
-                caption = paste("data elements with search term" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")) 
+                   # 'html' ,
+                caption = paste("data elements with search term" ) ) 
+            # %>%
+            #     pander_styling( # bootstrap_options = c("striped", "hover")
+            #         ) 
         } else {
             datatable( select( de.filter , 
                         name, Group, zeroIsSignificant, lastUpdated, categoryCombo
@@ -889,7 +905,7 @@ There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help ident
     #                arrange( Group , dataElement) ,
     #            filter = 'top')
             
-    # de.list( filter = TRUE , kable = FALSE)
+    # de.list( filter = TRUE , pander = FALSE)
 ```
 
 ## Malaria-Groups
@@ -913,13 +929,13 @@ if (nrow(deg.mal)>0 ){
 
 } else { print("There are no data element groups with 'malaria' (or 'palu') in the name")}
             
-    # de.list( filter = TRUE , kable = FALSE)
+    # de.list( filter = TRUE , pander = FALSE)
 ```
 
 ## Malaria
 
 ```{r}
-    de.list( mal , kable = FALSE )
+    de.list( mal , pander = FALSE )
 ```
 
 ## Malaria related terms
@@ -970,7 +986,7 @@ excluding 'yellow' and 'typhoid'
 ## Stocks
 
 ```{r}
-    de.list( stock , kable = FALSE )
+    de.list( stock , pander = FALSE )
 ```
 
 
@@ -1347,7 +1363,7 @@ d = dsde %>%
     
     ) 
 
-  count( d, dataSet, categoryCombos,  periodType, timelyDays  )  %>% kable
+  count( d, dataSet, categoryCombos,  periodType, timelyDays  )  %>% pander
 
     
 # TODO: add in indice of %OU associated with each dataset
@@ -1439,9 +1455,12 @@ datatable( d %>%
        arrange( Name ) %>%
        select( Name, periodType, timelyDays, id)
    
-   kable( mal.datasets, 'html' ) %>% 
-       kable_styling(bootstrap_options = c("striped", "hover"))%>%
-        column_spec(1, bold = T) 
+   pander( mal.datasets  )
+   # %>% 
+   #     pander_styling( # bootstrap_options = c("striped", "hover")
+   #         ) 
+   # %>%
+   #      column_spec(1, bold = T) 
    
    # NB TODO:  Table of data groups (because it is removed from mal.datasets, to avoid duplicates)
 
@@ -1795,1788 +1814,3 @@ mal_indicators_n = sum( mal_indicators )
 <!-- TODO : definitions for indicators  -->
 
 
-=======
----
-title: DHIS2 Metadata
-output:
-  html_document:
-    css: custom.css
-    toc: true
-    toc_float: true
-    code_folding: hide
-    fig_caption: yes
-    self_contained: yes
-    # template: html_template.html 
-  pdf_document:
-    fig_caption: yes
-  word_document: 
-    toc: true
-    fig_caption: yes
-editor_options: 
-  chunk_output_type: console
-params:
-  dhis_instance: Nigeria
-  data_directory: 
-  output_directory: ./ # bug: only uses current directory
-  cache: FALSE
-  echo: FALSE
----
-
-<!-- NB:  If cache = TRUE, MUST clear cache when changing to country for review.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->
-
-# **`r toupper( params$dhis_instance )` Metadata** {.tabset .tabset-fade}
-
-
-```{r packages, echo = TRUE, cache=FALSE, warning=FALSE, include = FALSE }
-
-
-# list of required packages
-    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet",
-                     "geojsonR", "rmapshaper" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "tidyverse", "readxl" , "knitrProgressBar" )
-
-# Function to test if package is installed 
-    pkgTest <- function( package.list = package.list ){
-        
-        missing.packages = setdiff( package.list , rownames(installed.packages())) 
-        if ( length( missing.packages ) > 0 ) install.packages( missing.packages ) 
-    }
-
-
-# Test if packages loaded
-    pkgTest( package.list )
-
-# load the packages
-    lapply( package.list, suppressMessages( require ) , character.only = TRUE)
-
-
-knitr::opts_chunk$set( echo = params$echo ,
-                       fig.width =  8, 
-                       # knitr.table.format = "html" ,
-                       cache = params$cache # TRUE for testing; FALSE for production
-                       )
-
-```
-
-
-```{r sources, cache = FALSE}
-
-  # functions for fetching metadata
-
-  source( 'dhis2_functions.R'  )
-
-    data_directory = params$data_directory
-    dhis_instance = params$dhis_instance
-    output_directory = getwd() # params$output_directory
-  
-  # folder for storing review data
-
-  origin.folder = paste0( ifelse( is.null( data_directory ) , "" , 
-                                  paste0( data_directory, "/" ) 
-                                  ) ,
-                          dhis_instance , "/")
-  
-  # if does not exist, create folder for review
-  if (!dir.exists( dhis_instance )) dir.create( dhis_instance )
-
-  # origin.login shortcut
-   origin.login = function(){
-       source( paste0( origin.folder , 
-                       tolower( dhis_instance ) , 
-                       "_login")  )
-       # print( baseurl )
-       loginDHIS2( baseurl, username, password)
-   }
- 
-
-```
-
-<!-- Define the year-month time periods for the review -->
-
-<!-- NB:  What about IDSR with weeks?  -->
-
-```{r date_strings }
-
- # Function to create string of dates
-  date_code = function( years = 2013:2017 , months = 1:12 ){
-    period = character()
-    
-    for (year in years ){
-      for (month in seq_along(months)){
-        this_period = paste0( ";", 
-                         year , 
-                         ifelse( month < 10 , paste0("0", month) , month )
-        )
-        period =  c(period, this_period )
-      }
-    }
-    
-    # remove first ;
-    period =  paste( period, collapse = "")
-    period = substring( period, 2, nchar(period))
-    
-    return( period )
-  }
- 
-  periods = date_code() # default: 2013-2017
-  # periods = date_code( 2017, 1 ) # January 2017 only
-  
-  # as character vector
-  periods.vector = strsplit( periods, ";" , fixed = TRUE )[[1]]
-
-  
-```
-
-
-## Metadata Structure
-
-
-
-Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.    
-
-`r params$dhis_instance` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`), last updated `r md$system$date`.
-
-
-
-```{r list_viewer, eval= FALSE }
- jsonedit( md )
-```
-
-## Metadata list
-
-```{r attribute_numbers }
-
- metadata_attributes = map_df( md[names(md)], ~length(.x$id) ) %>% 
-    gather( attribute, value ) %>% # columns to rows
-    mutate( value = comma( value ) )   # format numbers
-    
-
-  metadata_attributes %>%
-      kable( align = c( 'l', 'r' ), 'html' ) %>% 
-      kable_styling( bootstrap_options = c("striped", "hover") ) %>%
-        column_spec(1, bold = T) %>%
-      scroll_box(height = "500px")
-
-```
-
-<!-- ## Metadata viewer -->
-
-```{r list_metadata, eval=FALSE}
-
-z = lapply( md , function(x) x = x[[1]] )
-
-listviewer::jsonedit( z )
-```
-
-
-## APPS Installed
-
-```{r apps, warning=FALSE}
- 
-  if ( length(apps)>0 ){
-     chrs = map_lgl( colnames(apps) , ~is.character( apps[, .x]) )
-    datatable( apps[, chrs ])
-  } else {
-    cat('No installed apps')
-  }
-  
-```
-
-# Organisational Units {.tabset .tabset-fade}
-
-There are `r  md$organisationUnits %>% nrow %>% comma()` organisation units in `r  md$organisationUnitLevels %>% nrow` levels. Of these, `r sum( map_lgl( md$organisationUnits$attributeValues , ~length(.x) > 0 ) )` are assigned an attribute.  
-
-
-## Organizational Units and levels
-
-```{r ou_and_levels }
-
-  # levels
-  levels = character()
-    
-  for ( i in seq_along( md$organisationUnitLevels$id) ){
-    
-        levels =  c(levels, paste0("LEVEL-", i) )
-      }
-      
-  levels = paste( levels, collapse = ";")
-  
-  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
-
-  
-   ous =  md$organisationUnits %>% 
-        select( id, path, name, shortName, coordinates , 
-                created, lastUpdated , ends_with('Date') 
-                ) %>% as.tibble %>%
-       rename( orgUnit.name = name ) %>%
-       rowwise() %>%
-        mutate( 
-          level = map_int( path, 
-                               ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
-                               ) ,
-          parent.id =  map_chr( path, ~parse_parent_ous( .x ) ) ,
-          feature = map_chr( coordinates, ~feature_type(.x ) )
-        ) %>%
-       inner_join( md$organisationUnits %>% select( id, name ) ,
-                   by = c('parent.id' = 'id' ) ) %>%
-       ungroup() %>%
-       rename( parent_ou.name = name )
-   
-
-  table_ou_levels =   count( ous, level ) %>%
-      # left_join( select( md$organisationUnitLevel, offlineLevels, name) ,
-      left_join( select( md$organisationUnitLevel, name, level ) ,
-                  # by = c('level'='offlineLevels') ) %>% 
-                  by = c('level'='level') ) %>% 
-            filter( !grepl( 'Level', name )  ) %>% # removes generic levels ('Level-8')
-      select( level, name, n ) 
-  
-  
-  # Add feature types
-  ousFeatures = count( ous, level, feature ) %>% 
-      spread(  feature, n )
-  
-  feature_table = left_join( table_ou_levels, 
-                            ousFeatures, by = 'level' ) %>%
-      mutate( n = comma(n) ) 
-    
-  kable( feature_table, align = c( 'l', 'l', 'r' ) ,
-         'html' ,
-                caption = paste("Organisational Unit Levels" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")
-                              ) 
-
-```
-
-## Un-geocoded facilities
-
-```{r}
-
-ungeo = ous %>%
-    filter( is.na( feature ) ) %>%
-    arrange( level, parent_ou.name , orgUnit.name ) %>%
-    select( level, parent_ou.name, orgUnit.name )
-
-
-  kable( ungeo, 
-         'html' ,
-         caption = paste("Organisational Units By Year" ) 
-         ) %>%
-      kable_styling(
-          bootstrap_options = c("striped", "hover")
-          ) 
-  
-```
-
-## OU Levels
-
-```{r ou_levels}
-
-
-  # levels
-      levels = character()
-      for ( i in seq_along( md$organisationUnitLevels$id) ){
-    
-        levels =  c(levels, paste0("LEVEL-", i) )
-      }
-      
-      levels = paste( levels, collapse = ";")
-  
-  # import month by month
-  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
-  
-```
-
-summarise enumerated features by level
-
-NB : stratify by attributes such as private, public--if available
-
-```{r ous_by_level}
-
- # count(ous, nchar( openingDate)>0 ) # all have
-
- t = table( year( ymd_hms( ous$openingDate )) ) %>% 
-    addmargins(.) %>%
-    as.tibble()
-
-# but some are recent
-
-  kable( t , 
-         'html' ,
-                caption = paste("Organisational Units By Year" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")
-                              ) 
-
-
-```
-
-## Administrative boundaries and facilities 
-
-```{r}
-
-
-admins_file =  paste0( origin.folder , dhis_instance, "_admin_boundaries.rds" ) 
-admins = readRDS( admins_file)
-
-
-clinics_file =  paste0( origin.folder , dhis_instance, "_facilities.rds" ) 
-clinics = readRDS( clinics_file)
-
-
-facilities_file =  paste0( origin.folder , dhis_instance, "_updated_facilities.rds" ) 
-facilities = readRDS( facilities_file )
-
-     
-# imputed 
-count( facilities , has.coordinates, impute )
-
-```
-
-## Map: Health facilities with number of confirmed malaria cases 
-
-- Number of orgunits per administrative area 
-
-```{r orgunit.per.area }
-
-#  count units per parentid and join with admins
-facilitiescount = facilities %>% count( parent.id )
-
-admins.count = admins %>% select( -polygons) %>%
-    left_join( facilitiescount , by = c ( 'id' = 'parent.id' ) )  
-
-admins.count$polygons = admins$polygons
-admins.count$lat = geosphere::centroid( admins$polygons )[, 2 ]
-admins.count$long = geosphere::centroid( admins$polygons )[, 1 ]
-
-```
-
-```{r cleangeoAdmins }
-
-
-admins$polygons = rmapshaper::ms_simplify(admins$polygons ,keep = .99 )  
-
-```
-
-
-```{r orgUnitMap}
-
-    # pal = colorNumeric('OrRd', d$value.scale )
-    binpal <- colorBin(
-        c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00'), 
-        clinics$Year , 2014:2018 )
-
-    binpal.admins.count <- colorBin(
-        brewer.pal( 5, "Reds"), 
-        admins.count$n )
-
-    factpal <- colorFactor( 
-        c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00'), 
-        clinics$Year, reverse = TRUE )
-
-    orgUnitMap = leaflet(  data = facilities  ) %>%
-        
-        addTiles(  urlTemplate = 
-                    "http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                   )  %>%
-     
-        addPolygons( data = admins[ admins$level %in% 2 , ]$polygons  ,  
-                     group = 'Regions' , 
-                     color = "black", 
-                     weight = 1 , 
-                     opacity = .5 ,
-                     fillColor = "white" ,
-                     fillOpacity = 0
-                     
-                     ) %>%
-     addPolygons( data = admins[ admins$level %in% 3 , ]$polygons ,  
-                     group = 'Districts' , 
-                     color = "black", 
-                     weight = 1 , 
-                     opacity = .5 ,
-                     fillColor = "white" ,
-                     fillOpacity = 0
-                     
-                     ) %>%
-     addPolygons( data = admins[ admins$level %in% 4:6 , ]$polygons,  
-                     group = 'Sub-districts' , 
-                     color = "black", 
-                     weight = 1 , 
-                     opacity = .5 ,
-                     fillColor = "white" ,
-                     fillOpacity = 0
-                     
-                     ) %>%
-     
-    addCircleMarkers( data = admins.count[ !is.na( admins.count$n ) , ] ,
-            group = "Facility count" ,
-            ~long, ~lat  # use mix of actual and imputed values 
-            , radius =  ~  n^.5 ,
-            weight =  1 ,
-            label = ~paste( n )  ,
-            labelOptions = labelOptions( 
-                permanent = TRUE ,
-                noHide = FALSE, 
-                textOnly = TRUE, 
-                textsize = "14px"
-                ) ,
-            # clusterOptions = markerClusterOptions() ,
-            popup = ~paste( n )  ,
-            color = "Grey" , # ~binpal.admins.count(n)  , 
-            opacity = .7 ,
-            fillColor = "Grey" , # ~binpal.admins.count(n) , 
-            fillOpacity = .75
-            
-        ) %>%
-     
-        addCircles( data = facilities %>% filter( !impute ) ,
-            group = "Actual" ,
-            ~long., ~lat.  # use mix of actual and imputed values 
-            , radius =  ~level ,
-            weight =  2 ,
-            label = ~paste( name , "(level:", level, ")", "Year:", Year )  ,
-            labelOptions = labelOptions(noHide = FALSE, textOnly = TRUE, textsize = "14px") ,
-            popup = ~paste( name , "(level:", level, ")", "Year:", Year )  ,
-            color = ~factpal(Year)  , opacity = .7 ,
-            fillColor = ~factpal(Year) , 
-            fillOpacity = .75
-        ) %>%
-     
-        addCircles( data = facilities %>% filter( impute ) ,
-            group = "Imputed" ,
-            ~long., ~lat.  # use mix of actual and imputed values 
-            , radius =  ~level ,
-            weight =  2 ,
-            label = ~paste( name , "(level:", level, ")", "Year:", Year )  ,
-            labelOptions = labelOptions(noHide = FALSE, textOnly = TRUE, textsize = "14px") ,
-            popup = ~paste( name , "(level:", level, ")", "Year:", Year )  ,
-            color = ~factpal(Year)  , opacity = .7 ,
-            fillColor = ~factpal(Year) , 
-            fillOpacity = .75
-        ) %>%
-     
-        addScaleBar() %>%
-     
-        # addLegend(pal = factpal, values = ~level , opacity = 1 ) %>%
-        addLegend( pal = factpal, 
-                   values = ~Year, 
-                   opacity = 1 ) %>%
-     
-        # Layers control
-        addLayersControl(
-                  overlayGroups = c("Actual", "Imputed", 
-                                    'Regions' , 'Districts',
-                                    'Sub-districts' ,
-                                    "Facility count"), 
-                  # options = layersControlOptions(collapsed = FALSE),
-                  position = "topright"
-               )  
- 
- 
- orgUnitMap
- 
-
-```
-
-- NB: TODO Map of number of org units by admin level
-
-
-
-```{r, eval=FALSE}
-# 2017 data
-    data.2017 = data %>%
-        filter( orgUnit %in% clinics$id ) %>% 
-        mutate( year = substr( period , 1, 4 )  )  %>%
-        filter( year %in% 2017 ) %>%
-        group_by( year ,  orgUnit, dataElement ) %>%
-        summarise( value = sum( as.double(value) ) ) %>%
-        left_join( select( md$organisationUnits , id , name  , path) %>%
-                       mutate( level = map_int( path,
-                                                ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
-                       ) ),
-                   by = c("orgUnit" = 'id' )
-                   ) %>%
-        ungroup %>%
-        rename( HF = name, id = dataElement ) %>%
-        left_join( select( md$dataElements, id, name ) ,
-                   by = c( 'id' ))  %>%
-        rename( dataElement = name ) %>%
-        select( year , level, HF, dataElement, value ) 
-    
-# numbers of HF submitting data (note, does not reflect number of months.  could be 1 or 12)
-    # count(data.2017, level, dataElement)
-```
-
-```{r, fig.width= 8, fig.height=10, eval=FALSE }
-
-# select data.element to show by finding most frequent
-de_freq = data  %>%
-    mutate( year = substr( period, 1, 4 )) %>%
-    inner_join( select( md$dataElements, id, name  ) , 
-                by = c('dataElement'='id' )) %>%
-    count( year, name ) %>%
-    arrange( desc(year), desc(n) ) 
-
-de_most_freq = de_freq[1, ]
-
-
-d = left_join( clinics , 
-                  filter( data.2017, 
-                          dataElement %in% de_most_freq 
-                          # value > 0 
-                          ) %>%
-                      select( year, HF, value ),  
-                  by = c('name' = 'HF') 
-                              ) %>%
-                mutate( 
-                    value = ifelse( is.na( value ), 0 , value ) ,
-                    value.scale = ifelse( !is.na(value) & value>0 , 
-                                                    1 + log(1 + value/ mean(value, na.rm = TRUE) ) , 
-                                                 2 ) 
-                        ) %>%
-    filter( abs(long) <= 180 , abs(lat) <= 180 )
-
- # NB: add test to see if coords within country; if not, try reversing
-
-
-    pal = colorNumeric('OrRd', d$value.scale )
-    binpal <- colorBin("plasma", d$value , 5, pretty = TRUE)
-    factpal <- colorFactor( brewer_pal("qual", 2)(7),  d$level)
-
- leaflet( d ) %>% 
-        addTiles(  urlTemplate = 
-                       "http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                   )  %>%
-        addCircles( 
-            ~long, ~lat, 
-            radius =  500 ,
-            weight =  ~value.scale ,
-            label = ~paste( name , "(level:", level, ")" , comma( value ) )   ,
-            labelOptions = labelOptions(noHide = FALSE, textOnly = TRUE, textsize = "14px") ,
-            popup = ~paste( name , "(level:", level, ")" , comma( value ) ) , 
-            color = ~binpal(value)  , opacity = 1 ,
-            fillColor = ~binpal(value) , fillOpacity = .6
-        ) %>%
-        addScaleBar() %>%
-        # addLegend(pal = factpal, values = ~level , opacity = 1 ) %>%
-        addLegend(pal = binpal, values = ~value, opacity = 1 ) 
- 
-
-```
-
-
-## Numbers of orgUnits by level, by year
-
-
-```{r ous_charts_by_level}
-
-
-  p = strsplit( periods , ";" , fixed = TRUE )[[1]]
-  p = paste0( p , "01")
-  p = ymd( p )
-  
-  # Get parent string form path
-  parent_string = function( path ){
-    o = strsplit( path, split='[/]') %>% unlist
-    o = o[ c(-1, -length(o)) ]
-
-    parent_string = paste( o, collapse  = "/")
-    return( parent_string )
-  }
-  
-  
-  
-  # number of units per level 
-   n.level = list()
-   for ( i in seq_along( levels.vector ) ){
-      
-      n = map_int( p, ~ous %>%
-                      filter( level %in% i  ) %>%
-                      summarise(
-                        n = sum( openingDate < .x & 
-                                # if available, check closed date 
-                                 if( "closedDate" %in% names(md$organisationUnits) ){
-                                     ifelse( !is.na(closedDate), 
-                                           closedDate > .x, TRUE )
-                                 } else { TRUE }
-                                 ) 
-                        ) %>% .$n
-      )
-      n.level[[i]] = n 
-   }
-   
-  # combine into df
-  ous.n = data_frame(
-    level = rep( seq_along( levels.vector ) , each = length(p) ) ,
-    period =  rep( periods.vector, length( levels.vector ) ) ,
-    n = unlist( n.level )
-  ) %>%
-    filter( n > 1 ) 
-  
-
-  d = ous.n %>%
-      # level names
-      left_join( 
-          select( md$organisationUnitLevels, level, name  ) , 
-          by = 'level' ) %>%
-    mutate( 
-        name = fct_reorder( name, level )
-        ) %>%
-     filter( )
-
-# convert month-Yr to dat
-  d$date = fast_strptime( as.character(  d$period ) , "%Y%m") %>% as.POSIXct
-  
-  ggplot( d,  aes(x = date, y = n, group = level )) + 
-      geom_line() +
-      facet_wrap( level~name , scales = 'free' )
-  
-  
-  ###NB Join wiht ou levels for labels
-
-```
-
-NB: not all ou will be assigned to a dataset, and some may be duplicates...
-
-## Are names repeated? 
-
-```{r ous_repeat_names }
- # are names repeated? 
-
-repeated.ou.names = ous %>% count( level, orgUnit.name ) %>% 
-    arrange(-n) %>% 
-    filter(n>1) %>%
-    left_join( 
-        ous %>% 
-            count( level, parent_ou.name , orgUnit.name , id ) %>% 
-            select(-n),
-        by = c("level", "orgUnit.name" )
-        )
-
-    if( nrow( repeated.ou.names ) > 0 ){
-          
-          kable( repeated.ou.names, 
-                 'html' ,
-                caption = paste("Organisational Units By Year" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")
-                              ) 
-      } else {
-          print( "No names are repeated." )
-      }
-
-```
-
-## Are ids repeated? 
-
-```{r ous_repeat_ids }
- # are names repeated? 
-
-duplicated.ou.ids = ous %>% count( level, orgUnit.name , id ) %>% 
-    arrange(-n) %>% 
-    filter( n>1 ) 
-
-
-    if( nrow( duplicated.ou.ids ) > 0 ){
-          
-          kable( duplicated.ou.ids, 
-                 'html' ,
-                caption = paste("Organisational Units By Year" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")
-                              ) 
-      } else {
-          print( "No ids are repeated." )
-      }
-
-
-```
-
-## OU unit groups and group sets ?   
-
-  - private / public
-  - elimination / control 
-  
-NB  confirm whether all units assigned to group
-
-## Categories linked with orgUnits
-  
-NB  confirm whether all units assigned to category
-
-
-
-# Data Elements {.tabset .tabset-fade}
-
-There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help identify relevant elements, we used several searches of the data element names.   
-
-## Search phrases 
-
-```{r de}
-
-    de = md$dataElements
-    
-    # Convert category combo from df to list (ends up with id as character)
-    de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
-    
-    # dataElement vars
-    # names( de )
-
-```
-
-```{r search_data_elements}
-    
-    mal = quo( grepl( '\\<malaria\\>|palu' , de$name , ignore.case = TRUE ) )
-    TB = quo( grepl( '\\<tb\\>' , de$name , ignore.case = TRUE ) )
-    HIV = quo( grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) )
-    imm = quo( grepl( 'imm' , de$name , ignore.case = TRUE ) )
-    conf = quo( grepl( 'conf' , de$name , ignore.case = TRUE ) )
-    susp = quo( grepl( 'susp' , de$name , ignore.case = TRUE ) )
-    opd = quo( grepl( '\\<opd\\>' , de$name , ignore.case = TRUE ) )
-    ipd = quo( grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )  )
-    patients = quo( grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
-         !grepl( '\\<hiv\\>|\\<tb\\>' , de$name , ignore.case = TRUE )
-         )
-    fever = quo( grepl( '\\<fever\\>' , de$name , ignore.case = TRUE )  &
-         !grepl( '\\<yellow\\>|\\<typhoid\\>' , de$name , ignore.case = TRUE )
-         )
-    attendance = quo( grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE ) )
-    anc = quo( grepl( '\\<anc\\>|\\<CPN\\>|\\<IPT\\>|\\<TPI\\>' , de$name , ignore.case = TRUE ) )
-    deaths = quo( grepl( 'death' , de$name , ignore.case = TRUE ) )
-    pop = quo( grepl( 'pop' , de$name , ignore.case = TRUE ) )
-    stock = quo( grepl( 'stock|rupture|\\<out\\>' , de$name , ignore.case = TRUE ) )
-    malaria_stock = quo( grepl( 'stock|rupture' , de$name , ignore.case = TRUE )  &
-         grepl( '\\<RDT\\>|\\<TDR\\>|\\<IPT\\>|\\<ACT\\>|\\<ASAQ\\>|\\<AL\\>|\\<APT\\>|<\\PTI\\>|\\<SP\\>|\\<fansidar\\>' , de$name , ignore.case = TRUE ) )
-    
-# More complicated search for malaria terms
-    malaria_terms_whole_words = 'malaria palu PF plasmodium RDT TDR IPT ACT ASAQ AL APT TPI SP fansidar slide micro fever fievre ANC CPN' %>%
-        stri_extract_all_words %>% unlist %>%
-        
-        # add '\\<' so that only whole word is found
-        sprintf( "\\<%s\\>", . )
-    
-    malaria_terms_part_words = NULL  # 'conf susp' %>% stri_extract_all_words %>% unlist
-    
-    malaria_search_terms = paste(  
-        c( malaria_terms_whole_words , 
-           malaria_terms_part_words ) ,
-        collapse = '|'
-    )
-    
-    malaria_items = quo( grepl( malaria_search_terms, de$name , 
-                      ignore.case = TRUE ) 
-                      &
-         !grepl( '\\<hiv\\>|\\<tb\\>|MTCT|\\<yellow fever\\>|\\<typhoid fever\\>' , de$name , ignore.case = TRUE )
-    )
-         
-# Organise all the searches as a list
-    searches = list( mal, malaria_items, TB, HIV, imm, conf, susp, opd, ipd, patients, fever, attendance, anc, deaths, pop , stock, malaria_stock )
-    
-    names.searches  = c( 'mal', 'malaria_items', 'TB', 'HIV', 'imm', 'conf', 'susp', 'opd', 'ipd', 'patients', 'fever', 'attendance', 'anc', 'deaths', 'pop', 'stock', 'malaria_stock' )
-    
-    
-    names( searches ) = names.searches 
-    
-# perform all searches and count number of hits    
-    search = 
-        map_df( seq_along(searches), 
-                ~data_frame(
-                    Search =   names.searches[.x] ,
-                    search_text = f_rhs( searches[[.x]] ) %>% deparse ,
-                    Count = sum( eval_tidy( searches[[.x]] ) )
-    ))
-    
-    kable( search , row.names = FALSE)
-
-```
-
-- "malaria_search_terms"" include English and French terms: `r paste( malaria_search_terms )` 
-
-- Note that when \\<*words*<\\ are surrounded by '\\<', the search is looking for the whole word (with leading and trailing space). 
-
-```{r de.list}
-
-
-    display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
-                                 'categoryCombo', 'id' )
-
-    de.list = function( filter, kable = TRUE ){   
-    
-        filter = eval_tidy( filter )
-        
-        de.filter = de[ filter , display.vars ] %>%
-            rename( categoryCombo.id = categoryCombo ) %>%
-            mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
-            
-            # categoryCombos
-            left_join(  
-                select( md$categoryCombos, id, name, categories ) %>%
-                            rename(categoryCombo.id = id,
-                                   categoryCombo = name ,
-                                   category.id = categories
-                            ) , 
-                        by = 'categoryCombo.id'
-                        ) %>%
-        
-            # dataElementGroups
-            left_join( 
-                md$dataElementGroups %>% 
-                    select( name, dataElements) %>%
-                    rename( Group = name ) %>% 
-                    unnest ,
-                by = 'id'
-                )  
-            
-        if (kable){ 
-            kable(
-                select( de.filter , 
-                        name, Group, zeroIsSignificant, lastUpdated, categoryCombo
-                        ) %>%
-                    rename( dataElement = name ) %>%
-                    arrange( Group , dataElement), 
-                   'html' ,
-                caption = paste("data elements with search term" ) ) %>%
-                kable_styling(bootstrap_options = c("striped", "hover")) 
-        } else {
-            datatable( select( de.filter , 
-                        name, Group, zeroIsSignificant, lastUpdated, categoryCombo
-                        ) %>%
-                    rename( dataElement = name ) %>%
-                    arrange( Group , dataElement) ,
-                filter = 'top')
-        }
-    }
-    
-```
-
-## Groups
-
-
-```{r}
-
-    deg = md$dataElementGroups 
-
-
-    de.deg =  de[  , display.vars ]  %>%           
-        # dataElementGroups
-        left_join( 
-                md$dataElementGroups %>% 
-                    select( name, dataElements) %>%
-                    rename( Group = name ) %>% 
-                    unnest ,
-                by = 'id'
-                )  %>%
-    count(  Group ) %>%
-    rename( `no. dataElements` = n)
-    
-    datatable( de.deg, filter = 'top')
-    
-    # datatable( select( deg , 
-    #                    name, Group, zeroIsSignificant, lastUpdated, categoryCombo
-    #                     ) %>%
-    #                rename( dataElement = name ) %>%
-    #                arrange( Group , dataElement) ,
-    #            filter = 'top')
-            
-    # de.list( filter = TRUE , kable = FALSE)
-```
-
-## Malaria-Groups
-
-
-```{r}
-
-deg.mal = md$dataElementGroups %>% 
-                    select( name, dataElements) %>%
-                    filter( grepl( "malaria|palu", md$dataElementGroups$name ,  ignore.case = TRUE ) ) %>%
-                    rename( Group = name ) %>% 
-                    unnest 
-
-
-if (nrow(deg.mal)>0 ){
-    de.deg =  de[  , display.vars ]  %>%           
-        # dataElementGroups
-        inner_join( deg.mal , by = 'id' ) 
-
-    datatable( de.deg, filter = 'top')
-
-} else { print("There are no data element groups with 'malaria' (or 'palu') in the name")}
-            
-    # de.list( filter = TRUE , kable = FALSE)
-```
-
-## Malaria
-
-```{r}
-    de.list( mal , kable = FALSE )
-```
-
-## Malaria related terms
-
-```{r}
-    de.list( malaria_items )
-```
-
-
-## TB
-
-```{r}
-    de.list( TB )
-```
-
-## HIV
-
-```{r}
-    de.list( HIV )
-```
-
-## Immunizations
-
-```{r}
-    de.list( imm )
-```
-
-## Patients
-
-```{r}
-    de.list( patients )
-```
-
-## Fever
-
-excluding 'yellow' and 'typhoid'
-
-```{r}
-    de.list( fever )
-```
-
-## Attendance
-
-```{r}
-    de.list( attendance )
-```
-
-## Stocks
-
-```{r}
-    de.list( stock , kable = FALSE )
-```
-
-
-## Deaths
-
-```{r}
-    de.list( deaths )
-```
-
-## Populations
-
-```{r}
-    de.list( pop )
-```
-
-
-
-# Number of facilities reporting each data element
-
-A list of variables was queried to see how many org units submitted data last year.  In total, there were `r sum( all.de )` variables queried. Of these, there were `r sum( !is.na(d.reported$value ) ) ` variables that were submitted by at least one org unit.  A listing of the variable can be found in the spreadsheet `r dhis_instance`_dataElements.xlsx.  
-
-
-```{r }
-# data frame of datasets and data elements
-  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
-            ~map_df( md$dataSets$dataSetElements[[.x]], 
-                     ~as.matrix(.x) )) %>%
-    rename( dataElement.id = dataElement , 
-            dataSet.id = dataSet ) %>%
-    left_join( md$dataElements %>% select( id, name ) ,
-               by = c('dataElement.id' = 'id' )) %>%
-    rename( dataElement = name ) %>%
-    left_join( md$dataSets %>% select( id, name ) ,
-               by = c('dataSet.id' = 'id' )) %>%
-    rename( dataSet = name )
-```
-
-
-
-```{r }
-
-open_ou =     md$organisationUnits %>% 
-    select( id, closedDate) %>%
-    filter( is.na(closedDate) ) %>%
-    select( id )
-
-n_facilities_assigned_to_datasets = md$dataSets %>%
-    select( id, organisationUnits) %>%
-    rename( dataSet.id = id ) %>% 
-    unnest( organisationUnits ) %>%
-    inner_join( open_ou , by = 'id' ) %>%
-    count( dataSet.id ) %>%
-    rename( n_facilities = n )
-    
-# number of options in each catgory combo
-
-options = md$categoryCombos %>% 
-    select( id, categories) %>% 
-    unnest( categories ) %>%
-    rename( categoryCombo = id , category = id1 ) %>%
-    inner_join( md$categories  %>% select( id, categoryOptions ), 
-                by = c('category' = 'id' )
-                ) %>%
-    unnest( categoryOptions ) %>% 
-    count( categoryCombo ) %>%
-    rename( n_options = n )
-
-
-# Select all malaria relevent variables
-malaria.groups = setdiff( names(searches) , c("TB", "imm", "HIV", "opd", "idp") )
-                            
-  all.possible.malaria.de = Reduce(  "|" , map( searches[ malaria.groups ], eval_tidy  ) )
-  # sum( all.possible.malaria.de )
-  
-de.selected = de[ all.possible.malaria.de , display.vars ] 
-
-
-d.mal.reported = d.reported[ , c("dataElement", "value")] %>% 
-    
-    rename( dataElement.id = dataElement ) %>%
-    
-    right_join( 
-        
-        de.selected %>% rename( dataElement = name ), 
-        
-        by = c("dataElement.id" = "id") 
-        
-        ) %>%
-    
-    left_join(
-        
-        options ,
-        
-        by = 'categoryCombo'
-        
-        ) %>%
-    
-   left_join( 
-       
-       dsde %>% select( dataElement.id , dataSet.id ) , 
-       
-       by = 'dataElement.id' 
-       
-       ) %>%
-    
-   left_join( 
-       
-       md$dataSets %>% select( id, name, periodType, timelyDays ) %>%
-           rename( dataSet = name ),
-       
-       by = c( 'dataSet.id' = 'id' )
-       
-       ) %>%
-    
-    left_join( 
-        
-        n_facilities_assigned_to_datasets , by = 'dataSet.id'
-        
-        ) %>%
-
-    mutate( 
-        
-        val = as.integer(value) 
-
-        , frequency = case_when(
-            periodType %in% "Weekly" ~ 52 ,
-            periodType %in% "Monthly" ~ 12 ,
-            periodType  %in% "Quarterly" ~ 4 ,
-            periodType  %in% "Yearly" ~ 1 ,
-            TRUE ~ 1
-        )
-            
-        , pVal = val / (frequency * n_facilities * n_options ) 
-
-            
-        ) %>% 
-    
-    mutate( 
-                Percent_Reported = sprintf("%1.2f%%", 100 * pVal ) 
-                ) 
-
-
-
-# If a data element linked to >1 dataSet, select the one with greatest number of facilities
-    d.mal.reported = d.mal.reported %>%
-        group_by( dataElement  ) %>%
-        arrange( -n_facilities  ) %>%
-        filter(  row_number() == 1 ) %>%
-        arrange( desc(pVal) ) 
-
-   datatable( d.mal.reported , filter = "top")
-```
-
-## suggested key data elements
-
-```{r}
-
- de.key = d.mal.reported %>%
-    filter( pVal > .3 ) %>%
-    arrange( dataSet , dataElement ) %>%
-    select( dataSet , dataElement , periodType, 
-            n_facilities, Percent_Reported , categoryCombo )
-
-datatable( de.key )
-# View( de.key )
-
-write_rds( de.key,  paste0( origin.folder ,
-                           dhis_instance, 
-                           "_key_data_elements.rds" ) )
-```
-
-# Categories
-
-
-How many **categories** are there? `r length( md$categories$id ) `
-
-```{r }
-    md$categories %>% select( id , name ) %>%
-    # walk( print( paste( "There are" , length(md$categories$id ) , 
-                 # "categories.") 
-                 # )
-          # ) %>% 
-    datatable
-```
-
-How many **category combos** are there?
-`r paste( "There are" , nrow( md$categoryCombos) %>% comma , 
-                 "category combos, with", 
-                 md$categoryCombos$categories %>% 
-                     unlist %>% 
-                     n_distinct( ),
-                 "categories.") `
-
-```{r}
-    # md$categoryCombos %>% select( id , name ) 
-
-    cc = data_frame(
-        categoryCombo.id = md$categoryCombos$id ,
-        categoryCombo = md$categoryCombos$name ,
-        category.id = md$categoryCombos$categories 
-    ) %>%
-        unnest() %>% 
-        inner_join( md$categories %>% select( id, name) ,
-                    by = 'id' ) %>%
-        rename( Category = name ) %>%
-        select( categoryCombo, Category ) 
-    
-    cc %>%
-        filter( categoryCombo %in% 
-                    ( count( cc, categoryCombo ) %>% 
-                    filter( n > 1 ) %>% .$categoryCombo 
-                    )
-                ) %>% 
-        datatable
-```
-
-How many **category options** are there? 
-`r  paste( "There are" , nrow( md$categoryOptions) %>% comma, "category options."   )`
-
-```{r}
-    md$categoryOptions %>% select( id , name ) %>% 
-    # walk( print( paste( "There are" , nrow(.) , 
-    #              "category options."  
-    #             ) 
-    #              )
-    #       ) %>% 
-    datatable
-```
-
-Of these, how many category options are used in the category  option combos?
-`r paste( "There are" , md$categoryOptionCombos$categoryOptions %>% 
-    unlist %>% 
-    n_distinct( ) %>% comma , 
-                 "category options used in category option combos.") `
-
-```{r}
-
-    # md$categoryOptionCombos$categoryOptions %>% 
-    # unlist %>% 
-    # n_distinct( )
-
-```
-
-<!-- Are there more than one category associated with a category combo? -->
-
-## Stockout categories
-
-At least one country uses the category options to record stock outs.  This section searches for that possibility
-
-```{r}
-
-stock.categoryOptions = quo( grepl( 'stock|rupture' ,
-                                    md$categoryOptions$name , 
-                                    ignore.case = TRUE ) &
-                                 grepl( 'out|rupture' ,
-                                    md$categoryOptions$name , 
-                                    ignore.case = TRUE ) 
-                             )
-
-search_text = f_rhs( stock.categoryOptions ) %>% deparse 
-
-found_categories = eval_tidy( stock.categoryOptions )
-
-Count = sum( found_categories  )
-
-md$categoryOptions$name[ found_categories ]
-
-```
-
-There are `r Count` category options referencing stock out or stock rupture.
-
-
-```{r}
-
-stock.categoryOptionCombos = quo( grepl( 'stock' ,
-                                    md$categoryOptionCombos$name , 
-                                    ignore.case = TRUE ) 
-                                  &
-                                 grepl( 'out|rupture' ,
-                                    md$categoryOptionCombos$name ,
-                                    ignore.case = TRUE )
-                             )
-
-search_text = f_rhs( stock.categoryOptionCombos ) %>% deparse 
-
-found_comboCategories = eval_tidy( stock.categoryOptionCombos )
-
-Count = sum( found_comboCategories  )
-
-md$categoryOptionCombos$name[ found_comboCategories ]
-
-```
-
-### Data Elements that use this stock out category option combo
-
-TODO...
-
-
-# Datasets {.tabset .tabset-fade} 
-
-There are `r  md$dataSets %>% nrow %>% comma()` datasets. Of these, `r sum( map_lgl( md$dataSets$attributeValues , ~length(.x) > 0 ) )` are assigned an attribute.  
-
-
-
-## All Datasets 
-
-<!-- TODO: show dataset- group- and data elements together -->
-
-```{r dataset_dataElement_categoryCombos}
-  # data frame of datasets and data elements
-  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
-            ~map_df( md$dataSets$dataSetElements[[.x]], 
-                     ~as.matrix(.x) ))
-
-# For versions <2.6, need to add categoryCombo
-    if ( !'categoryCombo' %in% names(dsde) ){
-      categoryCombos =  data_frame(
-          dataSet = md$dataSets$id ,
-          categoryCombo = md$dataSets$categoryCombo$id )
-      
-      dsde = dsde %>% inner_join( categoryCombos,  by = "dataSet")
-    }
-
-
-```
-
-```{r datatable_dataElements}
-
-
-d = dsde %>% 
-    # join data elements 
-    left_join( md$dataElements %>% 
-                   select( name, id, domainType, aggregationType, valueType, zeroIsSignificant ) , 
-                by = c('dataElement' = 'id' )
-                ) %>%
-    rename( dataElement.name = name ) %>%
-    left_join( md$dataSets %>% 
-                    select( name, id, periodType, timelyDays  ) , 
-                by = c('dataSet' = 'id' )
-                ) %>%
-    rename( dataSet.name = name ) %>%
-        left_join( md$categoryCombos %>%   
-                        select( name, id , categories ) , 
-                    by = c('categoryCombo' = 'id' )
-                    ) %>% 
-    rename( categoryCombos = name ) %>%
-    mutate(
-        # to keep all values, need to convert null to NA; 
-        # otherwise unlist() drops the null values
-        categories = map_chr( categories, 
-                              ~ifelse( is.null(.x), NA, 
-                                       paste( unlist(.x), collapse = ";" )
-                              )
-        )
-    ) %>%
-    left_join( md$categories %>% 
-                    select( name, id ) , 
-                by = c('categories' = 'id' )
-                ) %>%
-    select( -categories, -dataElement, -dataSet ) %>%
-    rename( category = name , 
-            dataElement = dataElement.name,
-            dataSet = dataSet.name ) %>%
-    mutate(
-        Malaria =  grepl( 'malaria|palu' , dataElement , ignore.case = TRUE ) ,
-        Malaria.conf = Malaria & grepl( 'conf' , dataElement, ignore.case = TRUE) ,
-        Malaria.susp = Malaria & grepl( 'susp' , dataElement, ignore.case = TRUE) ,
-        patients = grepl( 'patient' , dataElement , ignore.case = TRUE ) ,
-        stock = grepl( 'stock' , dataElement , ignore.case = TRUE ) ,
-        dataSet = factor( dataSet ), 
-        aggregationType = factor( aggregationType ) ,
-        valueType = factor( valueType ) ,
-        domainType = factor( domainType )
-    
-    ) 
-
-  count( d, dataSet, categoryCombos,  periodType, timelyDays  )  %>% kable
-
-    
-# TODO: add in indice of %OU associated with each dataset
-# TODO: add in data Element Groups 
-
-# glimpse(d)
-
-```
-
-## All dataElements within all dataSets
-
-
-```{r display_dataElement_dataSets}
-
-      
-datatable( d %>%
-    select( dataSet, dataElement, Malaria, patients, category, categoryCombos, 
-            zeroIsSignificant , aggregationType, valueType , domainType) ,
-    
-    caption = "Data Elements", 
-    filter = 'top', 
-    editable = TRUE,
-    rownames = FALSE, 
-    selection = 'multiple' , 
-    extensions = c( 'Buttons', 
-                           'FixedHeader'
-                           # , 
-                           # 'Responsive'
-                           ) , 
-           options = list( 
-               # dom = 't',
-               scrollX = TRUE,
-               scrollY = TRUE,
-               fixedColumns = TRUE ,
-               # dom = 'Bfrtip', 
-               # buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
-               pageLength = 15, fixedHeader = TRUE
-               )
-           ) 
-
-
-```
-
-
-## List of DataSet-dataElement Combinations
-
-```{r count_dataset_in_data, comment=""}
-
-    # display with names
-    dsde %>%
-        left_join( md$dataSets %>% select( id, name ), 
-                   by = c("dataSet"="id")
-                   ) %>%
-        select( -dataSet ) %>%
-        rename( dataSet = name ) %>% 
-        left_join( md$dataElements %>% select( id, name ), 
-                   by = c("dataElement"="id")
-                   ) %>%
-        select( -dataElement ) %>%
-        rename( dataElement = name ) %>% 
-        left_join( md$categoryCombos %>% select( id, name ), 
-                   by = c("categoryCombo"="id")
-                   ) %>%
-        select( -categoryCombo ) %>%
-        rename( categoryCombo = name ) %>%
-        datatable( rownames = FALSE, 
-                   options= list( pageLength = 15 , 
-                                  scrollY = TRUE) 
-                   )
-
-```
-
-## Dataset reporting malaria
-
-
-```{r datasets }
-
-   # NB : There may be duplicate rows in de.mal because the same elements belong to multiple groups.
-   # Compare with de.mal %>% select(-Group) %>% distinct()
-   
-
-  mald.dataset.ids = dsde %>% filter( dataElement %in% de[ eval_tidy( mal ) , 'id' ] ) %>% .$dataSet
-   
-   # just list of malaria datasets
-   mal.datasets = md$dataSets %>%
-       select( id, name, periodType, timelyDays ) %>%
-       filter( id %in% mald.dataset.ids ) %>%
-       rename( Name = name ) %>%
-       arrange( Name ) %>%
-       select( Name, periodType, timelyDays, id)
-   
-   kable( mal.datasets, 'html' ) %>% 
-       kable_styling(bootstrap_options = c("striped", "hover"))%>%
-        column_spec(1, bold = T) 
-   
-   # NB TODO:  Table of data groups (because it is removed from mal.datasets, to avoid duplicates)
-
-```
-
-## Assigned Organisation Units
- 
-```{r}
-
-  dataset.ous = md$dataSets %>% 
-    select( id, name ) %>%
-    # filter( name %in% unique( mal.datasets$dataset.name ) ) %>%
-    mutate(
-        ou = map( id, ~md$dataSets[  md$dataSets$id==.x , ]$organisationUnits ) ,
-        num.ou = map_int( ou , ~length( flatten( .x[[1]] ) ) )
-    ) %>%
-    select( -ou )
-
-```
- 
-Count the org units assigned to each form, which is the basis for the number of expected reports.  If an org unit is not assigned to the dataset, a report is not expected. 
-
-```{r dataset_ous , results = 'asis' }
-
-
-# Create table for each dataset
- for ( i in 1:nrow( mal.datasets ) ){
-   cat( dataset.ous.n( mal.datasets[i, 'Name'], ous ) )
- } 
- 
-  
-```
-
-
-
-## Are any dataElements in more than one dataSet?
-
-```{r dE_in_more_than_one_dataset}
-
-  # data frame of datasets and data elements
-  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
-            ~map_df( md$dataSets$dataSetElements[[.x]], 
-                     ~as.matrix(.x) )) %>%
-    rename( dataElement.id = dataElement , 
-            dataSet.id = dataSet ) %>%
-    left_join( md$dataElements %>% select( id, name ) ,
-               by = c('dataElement.id' = 'id' )) %>%
-    rename( dataElement = name ) %>%
-    left_join( md$dataSets %>% select( id, name ) ,
-               by = c('dataSet.id' = 'id' )) %>%
-    rename( dataSet = name )
-
-  gt1datset = dsde %>% 
-      select( dataElement.id, dataElement, dataSet )  %>%
-      group_by( dataElement.id , dataElement ) %>%
-      summarise( 
-          n_dataSets = n_distinct( dataSet ) ,
-          dataSets = paste( dataSet, collapse = "; ")
-          )  %>%
-      filter( n_dataSets > 1) %>%
-      arrange( n_dataSets, dataElement ) 
-  
-  cat( "There are" , nrow( gt1datset) %>% comma , "data elements assigned to more than one dataset." )
-  
-  datatable( gt1datset )
-
-```
-
-
-
-
-# Select variables...
-
-- There are `r comma( length( md$dataElements$id ) ) ` data elements, each with potential multiple option combinations (e.g. age groups)
-
-- Lets select some data elements using key word (or parital word) searches.  A spreadsheet will be created in the data directory listing data elements with 'malaria', 'ipd', 'attendance', and 'pop'.  
-
-- Open the spreadsheet:  when openned the column **Include** is blank.  Any character in the sheet will mark the variable for inclusion.
-
-- Save the sheet, then run the Data_Review.Rmd file to assess the data.  
-
-NB: Future versions should aspire to having a more elegant interface for selecting variables.
-
-```{r }
-# data frame of datasets and data elements
-  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
-            ~map_df( md$dataSets$dataSetElements[[.x]], 
-                     ~as.matrix(.x) )) %>%
-    rename( dataElement.id = dataElement , 
-            dataSet.id = dataSet ) %>%
-    left_join( md$dataElements %>% select( id, name ) ,
-               by = c('dataElement.id' = 'id' )) %>%
-    rename( dataElement = name ) %>%
-    left_join( md$dataSets %>% select( id, name ) ,
-               by = c('dataSet.id' = 'id' )) %>%
-    rename( dataSet = name )
-```
-
-
-```{r }
-
-open_ou =     md$organisationUnits %>% 
-    select( id, closedDate) %>%
-    filter( is.na(closedDate) ) %>%
-    select( id )
-
-n_facilities_assigned_to_datasets = md$dataSets %>%
-    select( id, organisationUnits) %>%
-    rename( dataSet.id = id ) %>% 
-    unnest( organisationUnits ) %>%
-    inner_join( open_ou , by = 'id' ) %>%
-    count( dataSet.id ) %>%
-    rename( n_facilities = n )
-    
-# number of options in each catgory combo
-
-options = md$categoryCombos %>% 
-    select( id, categories) %>% 
-    unnest( categories ) %>%
-    rename( categoryCombo = id , category = id1 ) %>%
-    inner_join( md$categories  %>% select( id, categoryOptions ), 
-                by = c('category' = 'id' )
-                ) %>%
-    unnest( categoryOptions ) %>% 
-    count( categoryCombo ) %>%
-    rename( n_options = n )
-
-
-# Select all malaria relevent variables
-malaria.groups = setdiff( names(searches) , c("TB", "imm", "HIV", "opd", "idp") )
-                            
-  all.possible.malaria.de = Reduce(  "|" , map( searches[ malaria.groups ], eval_tidy  ) )
-  # sum( all.possible.malaria.de )
-  
-de.selected = de[ all.possible.malaria.de , display.vars ] 
-
-
-d.mal.reported = d.reported[ , c("dataElement", "value")] %>% 
-    
-    rename( dataElement.id = dataElement ) %>%
-    
-    right_join( 
-        
-        de.selected %>% rename( dataElement = name ), 
-        
-        by = c("dataElement.id" = "id") 
-        
-        ) %>%
-    
-    left_join(
-        
-        options ,
-        
-        by = 'categoryCombo'
-        
-        ) %>%
-    
-   left_join( 
-       
-       dsde %>% select( dataElement.id , dataSet.id ) , 
-       
-       by = 'dataElement.id' 
-       
-       ) %>%
-    
-   left_join( 
-       
-       md$dataSets %>% select( id, name, periodType, timelyDays ) %>%
-           rename( dataSet = name ),
-       
-       by = c( 'dataSet.id' = 'id' )
-       
-       ) %>%
-    
-    left_join( 
-        
-        n_facilities_assigned_to_datasets , by = 'dataSet.id'
-        
-        ) %>%
-
-    mutate( 
-        
-        val = as.integer(value) 
-
-        , frequency = case_when(
-            periodType %in% "Weekly" ~ 52 ,
-            periodType %in% "Monthly" ~ 12 ,
-            periodType  %in% "Quarterly" ~ 4 ,
-            periodType  %in% "Yearly" ~ 1 ,
-            TRUE ~ 1
-        )
-            
-        , pVal = val / (frequency * n_facilities * n_options ) 
-
-            
-        ) %>% 
-    
-    mutate( 
-                Percent_Reported = sprintf("%1.2f%%", 100 * pVal ) 
-                ) 
-
-
-
-# If a data element linked to >1 dataSet, select the one with greatest number of facilities
-    d.mal.reported = d.mal.reported %>%
-        group_by( dataElement  ) %>%
-        arrange( -n_facilities  ) %>%
-        filter(  row_number() == 1 ) %>%
-        arrange( desc(pVal) ) 
-
-   datatable( d.mal.reported , filter = "top")
-```
-
-## suggested key data elements
-
-```{r}
-
- de.key = d.mal.reported %>%
-    filter( pVal > .3 ) %>%
-    arrange( dataSet , dataElement ) %>%
-    select( dataSet , dataElement , periodType, 
-            n_facilities, Percent_Reported , categoryCombo )
-
-datatable( de.key )
-# View( de.key )
-
-write_rds( de.key,  paste0( origin.folder ,
-                           dhis_instance, 
-                           "_key_data_elements.rds" ) )
-```
-
-## spreadsheet of variables
-
-```{r select_data_elements}
- 
-
-    de.review.xlsx = paste0( output_directory , "/" ,
-                             dhis_instance , "/" ,
-                             dhis_instance , "_" , 
-                             "dataElements.xlsx" )
-
-    # Create excel worksheet with separate tab for each search
-
-    l = map( seq_along( searches ) ,
-            
-            ~ de[ eval_tidy( searches[[.x]] )  , display.vars ] %>%
-            rename( categoryCombo.id = categoryCombo ) %>%
-            mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
-            
-            # categoryCombos
-            left_join(  
-                select( md$categoryCombos, id, name, categories ) %>%
-                            rename(categoryCombo.id = id,
-                                   categoryCombo = name ,
-                                   category.id = categories
-                            ) , 
-                        by = 'categoryCombo.id'
-                        ) %>%
-        
-            # dataElementGroups
-            left_join( 
-                md$dataElementGroups %>% 
-                    select( name, dataElements) %>%
-                    unnest %>% 
-                    group_by( id ) %>%
-                    summarise( 
-                        Group = paste( name, collapse = " / ")
-                        ) ,
-                by = 'id'
-                ) %>%  
-                  
-            # dataSets              
-            left_join(
-                dsde %>% select( dataElement.id, dataElement, dataSet )  %>%
-                    group_by( dataElement.id , dataElement ) %>%
-                    summarise( 
-                        n_dataSets = n_distinct( dataSet ) ,
-                        dataSets = paste( dataSet, collapse = "; ")
-                        )  , by = c('id' = 'dataElement.id')
-                ) %>%
-         
-        # number reported       
-        left_join( d.mal.reported %>% 
-                       group_by( dataElement.id ) %>%
-                       summarise( 
-                           value = sum( val, na.rm = TRUE ) , 
-                           pVal = max( pVal, na.rm = TRUE )) , 
-                   by = c( "id" = "dataElement.id" )   
-                   
-                   ) %>%
-
-        mutate(  
-            
-            Include = ifelse( pVal>.25, "Y" ,  NA ) ,
-            Reports_Last_Year = as.integer( value )
-            
-            ) %>%
-            
-        select( id, Include, pVal, Reports_Last_Year ,name , dataSets, Group , categoryCombo ) %>%
-        rename( dataElement.id = id, dataElement = name ) %>% 
-        arrange( -pVal,  dataElement )
-            
-
-    )
-    
-    names(l) = names.searches
-
- 
-    if ( file.exists( de.review.xlsx ) ){
-        
-        file.rename( de.review.xlsx , paste0( de.review.xlsx , 
-                                            format(Sys.time(),
-                                                   "%b%d%Y")
-        ))
-        
-        try( openxlsx::write.xlsx( l , de.review.xlsx ) )
-    } 
-    
-    
-```
-
-
-
-# Indicators  {.tabset .tabset-fade} 
-
-
-```{r indicators}
-
-indicators = md$indicators
-
-malaria_terms = 'malaria palu RDT TDR IPT ACT ASAQ AL APT PTI SP slide fever fiev'
-
-malaria_search_terms = unlist(stri_extract_all_words(malaria_terms))
-
-# add '\\<' so that only whole word is found
-malaria_search_terms_words = paste0( '\\<', malaria_search_terms, '\\>')
-
-mal_indicators = grepl( paste(malaria_search_terms, collapse = '|'), indicators$displayName )
-
-mal_indicators_n = sum( mal_indicators )
-
-```
-
-## There are `r nrow(indicators)` indicators.  Of these, `r mal_indicators_n` have a malaria seach term that includes: `r paste( malaria_terms) `.
-
-```{r}
- datatable( indicators, filter = 'top' )
-```
-
-
-<!-- TODO : definitions for indicators  -->
-
-
->>>>>>> 5a0f485dd79bc5bb4e32bf1388d9fe9cbc430760
