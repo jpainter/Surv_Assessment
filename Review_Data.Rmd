@@ -10,7 +10,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Sierra Leone Demo
+  dhis_instance: Malawi
   create_new: FALSE 
   data_directory:  
   output_directory: ./ # bug: only uses current directory
@@ -47,7 +47,9 @@ params:
 knitr::opts_chunk$set( echo = params$echo ,
                        message = FALSE ,
                        comment = "" ,
-                       fig.width =  8, 
+                       fig.width =  8,
+                       out.width = "100%" ,
+                       out.height = "75%" ,
                        # knitr.table.format = "html" ,
                        cache = params$cache # TRUE for testing; FALSE for production
                        )
@@ -639,8 +641,6 @@ Values shown are for the periods from `r min(periods.vector)` to `r max(periods.
 
 - Dataset 'completeness', better described as form submission rate because it indicates the number of facilties that submitted a report, regardless of th completeness of the report.   
 
-Table of number of org units that provided data for each data element, stratified by dataset (row headings) and orgUnit level (column headings).  
-
 <!-- What would be really cool--to show number of orgunits available, assigned to dataset, and actually submitted data for each dataset/data element. -->
 
 ```{r dataset_completeness }
@@ -677,11 +677,13 @@ This chart shows the percentage of active organisational units that were expecte
 ```{r expected_reports}
   # summary( s$completeness )
   
-    ggplot(s %>% filter( Category %in% "EXPECTED_REPORTS" ),  aes(x = date, y = completeness, 
+    ggplot(s %>% filter( Category %in% "EXPECTED_REPORTS" ),  
+           aes(x = date, y = completeness, 
                    group = level.name , color = level.name )) +
     geom_line() +
-    facet_grid( Category ~ dataSet, 
-                labeller = label_wrap_gen(width = 35, multi_line = TRUE)
+    facet_wrap( ~ dataSet, 
+                labeller = label_wrap_gen( width = 25, multi_line = TRUE) ,
+                ncol = 4
                 ) +
     labs( title = 'Percent of OrgUnits Expected to Report', 
              subtitle =  'denominator is current number of all org units' ,
@@ -695,27 +697,62 @@ This chart shows the percentage of active organisational units that were expecte
 
 This chart shows the perecentage of active organisational units that reported, and reported on time, during each period.  Completeness is shown by level, because a report was submitted at upper levels does not indicate the percentage of reports submitted by the lower levels organisation units. **Attention should be given to the lowest level, e.g. health facilities, where data is reported.** 
 
-```{r submitted_reports}
+```{r actual_reports}
   # summary( s$completeness )
   
-if ( s %>% filter( !Category %in% "EXPECTED_REPORTS" ) %>% nrow > 0 ){
-    ggplot( s %>% filter( !Category %in% "EXPECTED_REPORTS" ),  aes(x = date, y = completeness, 
-                   group = level.name , color = level.name )) +
+if ( s %>% filter( Category %in% "ACTUAL_REPORTS" ) %>% nrow > 0 ){
+    
+    ggplot( s %>% filter( Category %in% "ACTUAL_REPORTS" ),  
+            aes(x = date, y = completeness,
+                group = level.name , color = level.name )
+            ) +
     geom_line() +
-    facet_grid( Category ~ dataSet, 
-                labeller = label_wrap_gen(width = 35, multi_line = TRUE)
+    facet_wrap( ~ dataSet, 
+                labeller = label_wrap_gen( width = 25, multi_line = TRUE) ,
+                ncol = 4
                 ) +
-    labs( title = 'Crude completeness by data element', 
+        
+    labs( title = 'Percentage of Expected Recports Submitted', 
              subtitle =  'denominator is current number of all org units' ,
              caption = params$dhis_instance
              ) +
+        
     scale_y_continuous(labels = scales::percent)
+    
 } else {
+    
     cat("No data available on submitted datasets.")
 }
     
 ```
 
+```{r actual_onTime_reports}
+  # summary( s$completeness )
+  
+if ( s %>% filter( Category %in% "ACTUAL_REPORTS_ON_TIME" ) %>% nrow > 0 ){
+    
+    ggplot( s %>% filter( Category %in% "ACTUAL_REPORTS_ON_TIME" ),  
+            aes(x = date, y = completeness,
+                group = level.name , color = level.name )
+            ) +
+    geom_line() +
+    facet_wrap( ~ dataSet, 
+                labeller = label_wrap_gen( width = 25, multi_line = TRUE) ,
+                ncol = 4
+                ) +
+        
+    labs( title = 'Percentage of Expected Recports Submitted On-Time', 
+             subtitle =  'denominator is current number of all org units' ,
+             caption = params$dhis_instance
+             ) +
+        
+    scale_y_continuous(labels = scales::percent)
+    
+} else {
+    
+    cat("No data available on submitted datasets.")
+}
+```
 
 ## Percent completeness by Data Element
 
@@ -760,7 +797,8 @@ Subset to organizational unit levels with at least 20 expected reports
     geom_line() +
     # scale_y_continuous(limits = c(0,NA)) +
     facet_wrap( ~ dataElement, 
-                labeller = label_wrap_gen(width = 25, multi_line = TRUE)
+                labeller = label_wrap_gen(width = 25, multi_line = TRUE) ,
+                ncol = 4
                 ) +
     labs( title = 'Percent completeness by level', 
              subtitle =  '' ,
@@ -774,22 +812,26 @@ Subset to organizational unit levels with at least 20 expected reports
 
 ## Actual Number Reports by Data Element
 
-```{r}
+```{r , out.height="150%"}
 # Actual number
     ggplot(s %>% filter(expected >=20 ),  aes(x = date, y = reported, 
                    group = level.name , color = level.name )) +
     geom_line() +
     # scale_y_continuous(limits = c(0,NA)) +
     facet_wrap( ~ dataElement,
-                labeller = label_wrap_gen(width = 25, multi_line = TRUE)
+                labeller = label_wrap_gen(width = 25, multi_line = TRUE) ,
+                ncol = 4
                 ) +
     labs( title = 'Actual reports by level', 
              subtitle =  '' ,
              caption = params$origin_login_file
-             ) 
+             ) +
+    theme( strip.text = element_text( size = 6 ) )
 ```
 
 ## Reported dataElement by dataSet, level
+
+Table of number of org units that provided data for each data element, stratified by dataset (row headings) and orgUnit level (column headings).  
 
 ```{r Submission_de_Totals }
 
