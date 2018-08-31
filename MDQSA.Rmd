@@ -5,11 +5,19 @@ output: html_document
 editor_options: 
   chunk_output_type: console
 params:
+<<<<<<< HEAD
   dhis_instance: Malawi
   data_directory:  
   output_directory: ./ # bug: only uses current directory
   output_format: html_document
   create_new: FALSE 
+=======
+  dhis_instance:  Kenya.demo
+  data_directory:  
+  output_directory: ./ # bug: only uses current directory
+  output_format: html_document
+  create_new: TRUE 
+>>>>>>> 5a0f485dd79bc5bb4e32bf1388d9fe9cbc430760
   cache: FALSE
   echo: FALSE
 ---
@@ -114,7 +122,11 @@ This script creates the review documents by first downloading and cleaning some 
                            dhis_instance, 
                            "_metadata.rds" ) 
 
+<<<<<<< HEAD
   keep_the_existing_one = FALSE # so, dont download a new one.  
+=======
+  keep_the_existing_one = TRUE # so, dont download a new one.  
+>>>>>>> 5a0f485dd79bc5bb4e32bf1388d9fe9cbc430760
   ## This variable overrides the global parameter,  create_new
   
   if ( (!file.exists( meta_data_file) | params$create_new ) & !keep_the_existing_one ) {
@@ -140,6 +152,7 @@ This script creates the review documents by first downloading and cleaning some 
         
         null_meta = map_lgl(  1:n_resources ,  ~is.null( md[[.x]]) ) %>% which
         
+<<<<<<< HEAD
         # if null, try again
         if ( sum( null_meta ) > 0 ){ 
             
@@ -159,6 +172,18 @@ This script creates the review documents by first downloading and cleaning some 
                 }
             }
             
+=======
+        # try again  if null
+        md.try.again = map( null_meta , ~get_resources( .x )[[1]]  ) 
+        names( md.try.again ) = map_chr( null_meta , ~resources$plural[.x] )
+        # View( md.try.again )
+        
+        # if retry worked, update me 
+        try.again.worked = map_lgl(  1:length(md.try.again) , ~!is.null( md.try.again[[.x]] ) ) %>% which
+        
+        for ( i in 1:length(try.again.worked ) ){
+            md[[ null_meta[ try.again.worked[i] ] ]] = md.try.again[[ try.again.worked[i] ]]
+>>>>>>> 5a0f485dd79bc5bb4e32bf1388d9fe9cbc430760
         }
         
         names( md ) = map_chr( 1:n_resources , ~resources$plural[.x] )
@@ -403,7 +428,11 @@ clinics. = clinics %>%
                             "_updated_facilities.rds" 
                             ) 
  
+<<<<<<< HEAD
 keep_the_existing_one = FALSE # so, dont download a new one.  
+=======
+keep_the_existing_one = TRUE # so, dont download a new one.  
+>>>>>>> 5a0f485dd79bc5bb4e32bf1388d9fe9cbc430760
   ## This variable overrides the global parameter,  create_new
 
  if ( ( file.exists( updated_facilities_file ) & !params$create_new ) | keep_the_existing_one ){
@@ -691,6 +720,7 @@ if ( !exists( "facilities" ) ){
                              output.suffix
                              ) 
 
+<<<<<<< HEAD
     # rename if exists
     if ( file.exists( output.filename ) ){
         
@@ -703,6 +733,9 @@ if ( !exists( "facilities" ) ){
 
     # create new
     if ( !file.exists( output.filename )  ) { 
+=======
+    if ( !file.exists( output.filename ) | params$create_new ) { 
+>>>>>>> 5a0f485dd79bc5bb4e32bf1388d9fe9cbc430760
 
         rmarkdown::render( 'Display_Metadata.Rmd' ,
                            
@@ -738,13 +771,18 @@ if ( !exists( "facilities" ) ){
 
 ## Data
 
+<<<<<<< HEAD
 ```{r data_Review.  }
+=======
+```{r data_Review. , eval = FALSE }
+>>>>>>> 5a0f485dd79bc5bb4e32bf1388d9fe9cbc430760
     output.filename = paste0( output_directory, "/" ,
                               dhis_instance, "/", 
                              dhis_instance, "_data." ,
                              output.suffix
                              ) 
 
+<<<<<<< HEAD
     if ( file.exists( output.filename ) ){
         
             file.rename( output.filename , 
@@ -756,6 +794,9 @@ if ( !exists( "facilities" ) ){
 
 
     if ( !file.exists( output.filename ) ) { 
+=======
+    if ( !file.exists( output.filename ) | params$create_new ) { 
+>>>>>>> 5a0f485dd79bc5bb4e32bf1388d9fe9cbc430760
 
         rmarkdown::render( 'Review_Data.Rmd' ,
                            
@@ -769,7 +810,10 @@ if ( !exists( "facilities" ) ){
          
     }
 
+<<<<<<< HEAD
    # open file
+=======
+>>>>>>> 5a0f485dd79bc5bb4e32bf1388d9fe9cbc430760
    if ( file.exists( output.filename )) browseURL( output.filename ) 
 
 ```

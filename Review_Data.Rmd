@@ -1,3 +1,4 @@
+
 ---
 output:
   html_document:
@@ -7,6 +8,7 @@ output:
     code_folding: hide
     fig_caption: yes
     self_contained: no
+always_allow_html: yes
 editor_options: 
   chunk_output_type: console
 params:

@@ -1,3 +1,4 @@
+
 ---
 title: DHIS2 Metadata
 output:
@@ -2029,8 +2030,4 @@ mal_indicators_n = sum( mal_indicators )
 ```{r}
  datatable( indicators, filter = 'top' )
 ```
-
-
-<!-- TODO : definitions for indicators  -->
-
 
