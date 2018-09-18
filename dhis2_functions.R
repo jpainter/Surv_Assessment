@@ -351,6 +351,110 @@ get_resources = function( i , .pb = pb){
   # url<-paste0(baseurl,"api/system/info")
   # systemInfo = fromJSON( content(GET(url),"text") ) 
   
+## Levels from metatdata 
+
+levels_from_metatdata = function( md = NULL ){
+    
+    # levels
+    levels = character()
+    
+    for ( i in seq_along( md$organisationUnitLevels$id) ){
+        
+        levels =  c(levels, paste0("LEVEL-", i) )
+    }
+    
+    levels = paste( levels, collapse = ";")
+    
+    levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+    
+}
+
+
+
+## ous from metatadata
+
+ous_from_metatdata = function( md = NULL ){
+    
+
+    levels.vector = levels_from_metatdata( md )
+    
+    
+    ous =  md$organisationUnits %>% 
+        select( id, path, name, shortName, coordinates , 
+                created, lastUpdated , ends_with('Date') 
+        ) %>% as.tibble %>%
+        rename( orgUnit.name = name ) %>%
+        rowwise() %>%
+        mutate( 
+            level = map_int( path, 
+                             ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+            ) ,
+            parent.id =  map_chr( path, ~parse_parent_ous( .x ) ) ,
+            feature = map_chr( coordinates, ~feature_type(.x ) )
+        ) %>%
+        
+        # level names
+        left_join( select( md$organisationUnitLevel, name, level ) ,
+                   by = c('level'='level') ) %>% 
+        rename( level.name = name ) %>%
+        
+        # parent names
+        inner_join( md$organisationUnits %>% select( id, name ) ,
+                    by = c('parent.id' = 'id' ) ) %>%
+        ungroup() %>%
+        rename( parent_ou.name = name )
+    
+}
+
+
+## ous_ translated 
+
+ous.translated = function(  .meta = NULL, 
+                            open.only = TRUE  # limit to clinics currently open, only
+){
+  
+  
+  
+  stopifnot( !is.null( .meta ) )
+  
+  
+  meta_cols = c( 'id', 'name', 'openingDate', 'closedDate', 'path', 'coordinates' )
+  
+  .meta$organisationUnits[ , meta_cols]  %>% 
+    
+    as.tibble() %>% 
+    
+    filter( if ( open.only ){ is.na(closedDate) } else { TRUE }  ) %>%  
+    
+    mutate(
+      feature = map_chr( coordinates, ~feature_type(.x ) ) 
+    ) %>%
+    
+    rowwise() %>%
+    mutate( 
+      level = str_count( path , "/") , 
+      parent_ou = parse_parent_ous(path) 
+      
+    ) %>% 
+    
+    left_join( .meta$organisationUnitLevels[ , c('level', 'name')] %>% 
+                 rename( level.name = name ) ,
+               by = 'level' ) %>%
+    
+    left_join( .meta$organisationUnits[ , c('id', 'name')] 
+               %>% rename( parent_ou.name = name ) ,
+               by = c( 'parent_ou' = 'id' )
+    ) %>%
+    
+    ungroup() %>% 
+    
+    # select( -path , -closedDate ) %>%
+    
+    rename( orgUnit = id, orgUnit.name = name )
+  
+  
+}
+
  ## Correct coordinate text to have balanced brackets
  fix_coordinate_brackets = function( coordinates ){
      
@@ -655,7 +759,12 @@ get_resources = function( i , .pb = pb){
              rename( id = dataSet ) %>%
              left_join( md$dataSets %>% select( name, id ), 
                         by = "id" 
-             ) 
+             ) %>%
+             
+             # pretend datasets are dataelements
+             rename( dataElement.id = id ,  
+                     dataElement = name
+                     ) 
      }
      
      stopifnot( origin.login()  )
@@ -679,10 +788,10 @@ get_resources = function( i , .pb = pb){
          
          # todo: allocate size of list :
          data.de = vector(mode = "list", 
-                          length = length( dataElements$id )
+                          length = length( dataElements$dataElement.id )
                           )
          
-         for ( element in  seq_along( dataElements$id ) ){
+         for ( element in  seq_along( data.de ) ){
              
              update_progress(pb) 
     
@@ -703,13 +812,13 @@ get_resources = function( i , .pb = pb){
              }
              
              
-             de.ids = dataElements$id[ element ]
+             de.ids = dataElements$dataElement.id[ element ]
              
              if ( submissions ){
                  
                  reports = c( 'ACTUAL_REPORTS', 'ACTUAL_REPORTS_ON_TIME', 'EXPECTED_REPORTS' )
                  # get ids
-                 de.ids = dataElements[ element , ]$id 
+                 de.ids = dataElements$dataElement.id[ element ]
                  
                  # concatenate with report types
                  de.ids = paste0( de.ids, ".", reports , collapse = ';')
@@ -718,7 +827,7 @@ get_resources = function( i , .pb = pb){
              
              if ( details ){
                  
-                 de.index = which( md$dataElements$id %in% dataElements$id[ element ] )
+                 de.index = which( md$dataElements$id %in% dataElements$dataElement.id[ element ] )
                  
                  # data.frame of dataElement-id and categorycomb0-id
                  de.catCombo = data_frame( 
@@ -743,8 +852,8 @@ get_resources = function( i , .pb = pb){
                                           collapse  = ";" )
                  
                  print( paste( periods[ period ], "Element" , element ,
-                               "/" , length( dataElements$id ) ,
-                               ":" , dataElements$name[ element ],
+                               "/" , length( dataElements$dataElement.id ) ,
+                               ":" , dataElements$dataElement[ element ],
                                ":" , nrow( de.catOptCombo ) , "categories" 
                  )
                  )
@@ -753,8 +862,8 @@ get_resources = function( i , .pb = pb){
  
                  
             print( paste( periods[ period ], "Element" , element ,
-                               "/" , length( dataElements$id ) ,
-                               ":" , dataElements$name[ element ])
+                               "/" , length( dataElements$dataElement.id ) ,
+                               ":" , dataElements$dataElement[ element ])
                  )
 
              
@@ -1103,6 +1212,15 @@ get_resources = function( i , .pb = pb){
          column_spec(1, bold = T) 
      
      return(t)
+ }
+ 
+ # SKim Data
+ 
+ skim_data = function( df = NULL ){
+     
+     skim( df ) %>% select(-value) %>%
+         spread( stat, formatted)  %>% 
+         select( variable , n, missing, hist )
  }
  
  

@@ -1,6 +1,6 @@
 # Trend_Code.R
 
-library( tidyverse )
+
 library( lubridate )
 library(forecast)
 library(forecast)
@@ -8,18 +8,20 @@ library(seasonal)
 library(stlplus)
 library(zoo)
 library( tsibble )
+library(knitrProgressBar)
+library( tidyverse )
 
 dataset.translated = function( dataset_detail = NULL, .ous = NULL, .meta = NULL ){
     
-    stopifnot( !is.null( dataset_detail ) & !is.null(meta) )
+    stopifnot( !is.null( dataset_detail ) & !is.null(.meta) )
     
     stopifnot( 'categoryOptionCombo' %in% names( dataset_detail ) )
     
     if ( is.null( ous ) ){
         
-        if( !is.null( meta ) ){ 
+        if( !is.null( .meta ) ){ 
             
-            ous = ous.translated( meta , open.only = FALSE) 
+            ous = ous.translated( .meta , open.only = FALSE) 
             
         } else {
             print( "Function dataset.translated() stopped. Need to provide ous or meta")
@@ -28,10 +30,16 @@ dataset.translated = function( dataset_detail = NULL, .ous = NULL, .meta = NULL 
     
     idname = c('id', 'name')  # shortcut for fetching these two columns
     
-    d = dataset_detail %>%
-        inner_join(meta$dataElements[ , idname ], by = c('dataElement' = 'id' ) ) %>%
+    # remove levels from dataset so that it doesn't conflict
+    if ( "level" %in% names( dataset_detail )   ) {
+        
+        dataset_detail = dataset_detail %>% dplyr::select( -level )
+    }
+    
+    d = dataset_detail %>% 
+        inner_join( .meta$dataElements[ , idname ], by = c('dataElement' = 'id' ) ) %>%
         rename( dataElement.name = name ) %>%
-        inner_join(meta$categoryOptionCombos[ , idname ], by = c('categoryOptionCombo' = 'id' ) ) %>%
+        inner_join( .meta$categoryOptionCombos[ , idname ], by = c('categoryOptionCombo' = 'id' ) ) %>%
         rename( categoryOptionCombo.name = name ) %>%
         inner_join( ous, by = 'orgUnit' ) %>%
         separate( period, into = c("year", "month") , sep = 4 , remove = FALSE ) %>%
@@ -42,17 +50,20 @@ dataset.translated = function( dataset_detail = NULL, .ous = NULL, .meta = NULL 
         as.tibble()
 }
 
-ous.translated = function(  meta = NULL, 
+ous.translated = function(  .meta = NULL, 
                             open.only = TRUE  # limit to clinics currently open, only
                             ){
     
     
     
-    stopifnot( !is.null(meta) )
+    stopifnot( !is.null( .meta ) )
     
   
-    meta$organisationUnits %>%
-        select( id, name, openingDate, closedDate, path, coordinates ) %>%
+     meta_cols = c( 'id', 'name', 'openingDate', 'closedDate', 'path', 'coordinates' )
+    
+    .meta$organisationUnits[ , meta_cols]  %>% 
+        
+        as.tibble() %>% 
         
         filter( if ( open.only ){ is.na(closedDate) } else { TRUE }  ) %>%  
         
@@ -66,12 +77,20 @@ ous.translated = function(  meta = NULL,
             parent_ou = parse_parent_ous(path) 
                 
                 ) %>% 
-        left_join( meta$organisationUnits[ , c('id', 'name')] 
-                   %>% rename( parent_ou.name = name ) ,
-                   by = c( 'parent_ou' = 'id' )) %>%
         
-        ungroup() %>%
-        select( -path , -closedDate ) %>%
+        left_join( .meta$organisationUnitLevels[ , c('level', 'name')] %>% 
+                       rename( level.name = name ) ,
+                   by = 'level' ) %>%
+        
+        left_join( .meta$organisationUnits[ , c('id', 'name')] 
+                   %>% rename( parent_ou.name = name ) ,
+                   by = c( 'parent_ou' = 'id' )
+                   ) %>%
+        
+        ungroup() %>% 
+        
+        # select( -path , -closedDate ) %>%
+        
         rename( orgUnit = id, orgUnit.name = name )
     
     
@@ -417,7 +436,9 @@ decompose.seas.coe = function( df , plot = TRUE , cov = TRUE , model = TRUE ,
 }
 
 ## X-13ARIMA-SEATS decompose ####
-decompose.seas = function( df , year = NULL , plot = TRUE , cov = TRUE , model = TRUE , 
+decompose.seas = function( df , year = NULL , plot = TRUE , 
+                           cov = TRUE , 
+                           model = TRUE , 
                            transform = "log" ,
                            detect_outliers = FALSE ,
                            title = "", 
@@ -427,8 +448,7 @@ decompose.seas = function( df , year = NULL , plot = TRUE , cov = TRUE , model =
                            smooth = FALSE , # take moving average before analysing
                            impute = FALSE ,
                            zero_as_missing = FALSE , 
-                           verbose = FALSE ,
-                           ...
+                           verbose = FALSE 
                            ){
     
     
@@ -471,8 +491,10 @@ decompose.seas = function( df , year = NULL , plot = TRUE , cov = TRUE , model =
         df.adjusted[ df.adjusted == 0 ] = 1L
     }
     
-    seas_df <- try( 
-
+      seas_df <- 
+        
+        try( 
+ 
         seasonal::seas( df.adjusted
                               , na.action =  na.x13
                               # , x11 = "" # optional use of X11 model
@@ -541,7 +563,7 @@ decompose.seas = function( df , year = NULL , plot = TRUE , cov = TRUE , model =
     
     trend = seas_df$data %>% as_data_frame() %>% .$trend %>% as.double()
     
-    raw = as.integer( ts ) 
+    observed = as.integer( ts ) 
     
     adjusted = as.integer( df.adjusted )
 
@@ -563,12 +585,14 @@ decompose.seas = function( df , year = NULL , plot = TRUE , cov = TRUE , model =
             coe =  rem_sd / mean(seasonal + trend)
         }
         
+        
+        return_list = list() 
 
         if ( model ){
             
             return_list = list( seas_df )
             
-        } else { return_list = list() }
+        } 
         
         
         if (cov){
@@ -582,25 +606,37 @@ decompose.seas = function( df , year = NULL , plot = TRUE , cov = TRUE , model =
             
             seas_output = tibble(
                 date = date ,
-                raw = raw , adjusted = adjusted , seasonal = seasonal, remainder = rem , trend = trend
+                observed = observed , adjusted = adjusted , 
+                seasonal = seasonal, remainder = rem , 
+                trend = trend
+                
             ) %>%
                 gather( var, value, -date) %>%
                 mutate( 
-                    var = factor( var, levels = c('raw', 'adjusted', 'seasonal', 'trend', 'remainder') ) 
+                    var = factor( var, levels = c('observed', 'adjusted', 'trend', 'seasonal', 'remainder') ) 
                 )
+            
+            # drop adjusted if same as raw
+            if ( identical( observed, adjusted ) ) {
+                seas_output = seas_output %>%
+                    filter( !var %in% 'adjusted' ) %>%
+                    mutate( var = droplevels( var )
+                            )
+            }
             
             g = ggplot( seas_output, aes( x =  date , y = value )) +
                 geom_line() +
-                facet_grid( var ~ . , scales = 'free' ) +
-                theme_bw() +
+              facet_wrap( ~ var , ncol =1  , scales = 'free', strip.position = 'top') +
+              theme_bw() +
+              theme(strip.text = element_text(size = 20, face = "bold"))
                 labs( title = title , 
                       subtitle = paste( "Coefficient of Variation:" , scales::percent(coe) ) ,
                       caption = paste( transform , ":" , seas_df$model$arima$model ) )
             
             print( g )
-            return_list = c( return_list, g ) 
+            return_list = list( return_list, g ) 
         }
-   
+        
         return( return_list )
 }
 
@@ -758,10 +794,10 @@ sample_dec = function( data = x.dec, index = 1 ,  method = 'stl' , ... ){
     
     if (method %in% 'stl') decompose.stl( df  , transform = "log" , title = df.name, ...) 
     
-    if (method %in% 'seas') decompose.seas( df  , transform = "log" , title = df.name,  ...) 
+    if (method %in% 'seas') decompose.seas( df  , transform = "log" , title = df.name , model = FALSE , cov = FALSE ) 
 }
 
-# a manual version for remving trend and seasonality ####
+# Moving Average : a manual version for remving trend and seasonality ####
 trends = function( df ){
     
     # multiplicative
@@ -806,3 +842,45 @@ arimas = function( tsd = ts_ou_de  , show_plot = FALSE, title = "", ... ){
                                    , arima = "(0 1 1)(1 1 1)" )
     )  
 }
+
+# Displays ####
+
+quality_histogram = function( element = NULL , 
+                              d.nest.dec. = d.nest.dec ,
+                              instance. = instance ,
+                              .pb = NULL ){
+    
+    # progress bar
+    update_progress( .pb ) 
+    
+    x.dec = d.nest.dec. %>% filter( de.coc.name %in% element )
+    
+    x.dec$quality = cut( x.dec$dec, breaks = c( 0, .5, 1 , 2, Inf) , labels = letters[1:4] )
+    
+    x.dec = x.dec %>% arrange( level )
+    
+    # Change names for Kenya.demo
+    if ( instance. %in% 'Kenya.demo' ){
+        
+        kenya.labels = c( 'National' , 'Region', "District", "Sub-District" , "Ward" , "Facility", "Community" )
+        
+        kenya.levels = c( 'National' , 'SNU1', "SNU2", "SNU3" , "SNU4" , "Health Facility", "Community Unit" )
+        
+        
+        x.dec$level.name = factor( x.dec$level.name, 
+                                   levels = kenya.levels ,
+                                   labels = kenya.labels ,
+                                   ordered = TRUE )
+        
+        
+    }
+    
+    hist = x.dec %>% ggplot() + 
+        geom_bar( aes(quality)  ) + 
+        scale_x_discrete( 'Quality' , drop = FALSE ) +
+        facet_wrap(~level.name, scales = 'free' ) +
+        labs( title = element , subtitle = instance.  )
+    
+    print( hist )
+}
+

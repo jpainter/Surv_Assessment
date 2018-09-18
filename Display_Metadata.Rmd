@@ -25,7 +25,7 @@ editor_options:
   chunk_output_type: console
   
 params:
-  dhis_instance: Malawi
+  dhis_instance: Kenya.demo
   data_directory: 
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
@@ -61,6 +61,8 @@ params:
 
 knitr::opts_chunk$set( echo = params$echo ,
                        fig.width =  8, 
+                       fig.height = 10,
+                       dpi = 300 ,
                        # knitr.table.format = "html" ,
                        cache = params$cache # TRUE for testing; FALSE for production
                        )
@@ -264,8 +266,8 @@ There are `r  md$organisationUnits %>% nrow %>% comma()` organisation units in `
       mutate( n = comma(n) ) 
     
   pander( feature_table, align = c( 'l', 'l', 'r' ) ,
-         # 'html' ,
-                caption = paste("Organisational Unit Levels" ) )
+                caption = paste( "Organisational Unit Levels" ) 
+          )
   # %>%
   #               pander_styling( # bootstrap_options = c("striped", "hover")
   #                             ) 
@@ -350,8 +352,9 @@ clinics_file =  paste0( origin.folder , dhis_instance, "_facilities.rds" )
 clinics = readRDS( clinics_file)
 
 
-facilities_file =  paste0( origin.folder , dhis_instance, "_updated_facilities.rds" ) 
-facilities = readRDS( facilities_file )
+updated_facilities_file =  paste0( origin.folder , dhis_instance, "_updated_facilities.rds" ) 
+
+facilities = readRDS( updated_facilities_file )
 
      
 # imputed 
@@ -657,9 +660,43 @@ d = left_join( clinics ,
       geom_line() +
       facet_wrap( level~name , scales = 'free' )
   
+
   
   ###NB Join wiht ou levels for labels
 
+```
+
+```{r focus_on_increasing_facilities , eval=FALSE}
+  # Focus on hf and community unit ###
+    d. = d %>% filter( level == 7 )
+    
+    gg = ggplot( d. ,  aes(x = date, y = n, group = level )) + 
+      geom_line( size = 1, color = "blue") +
+     scale_y_continuous( labels = comma ) +
+      annotate("text", as.POSIXct("2015-3-1"), 4000 , 
+               label = paste0( "+" , 
+                              percent( (max(d.$n) - min(d.$n)) / min(d.$n)
+                                       )
+                              ),
+               size = 10 
+               )
+    gg <- gg + labs( x='Year', y='Community Health Workers\n')
+    gg <- gg + theme_bw()
+    # gg <- gg + theme(plot.background=element_rect(fill="#f7f7f7"))
+    # gg <- gg + theme(panel.background=element_rect(fill="#f7f7f7"))
+    gg <- gg + theme(panel.grid.minor=element_blank())
+    gg <- gg + theme(panel.grid.major.y=element_blank())
+    gg <- gg + theme(panel.grid.major.x=element_line())
+    gg <- gg + theme(axis.ticks=element_blank() ,
+                     axis.title=element_text(size = 16, face = "bold") ,
+                     axis.text=element_text(size = 14, face = "bold") )
+    gg <- gg + theme( legend.position="none" )
+    gg <- gg + theme( panel.border=element_blank() )
+    gg
+    
+    # ggsave( "increasing facilities.png" , width = 8, height = 4 )
+    ggsave( "increasing CHW.png" , width = 8, height = 4 )
+  
 ```
 
 NB: not all ou will be assigned to a dataset, and some may be duplicates...
@@ -1693,95 +1730,6 @@ write_rds( de.key,  paste0( origin.folder ,
 ```
 
 ## spreadsheet of variables
-
-```{r select_data_elements}
- 
-
-    de.review.xlsx = paste0( output_directory , "/" ,
-                             dhis_instance , "/" ,
-                             dhis_instance , "_" , 
-                             "dataElements.xlsx" )
-
-    # Create excel worksheet with separate tab for each search
-
-    l = map( seq_along( searches ) ,
-            
-            ~ de[ eval_tidy( searches[[.x]] )  , display.vars ] %>%
-            rename( categoryCombo.id = categoryCombo ) %>%
-            mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
-            
-            # categoryCombos
-            left_join(  
-                select( md$categoryCombos, id, name, categories ) %>%
-                            rename(categoryCombo.id = id,
-                                   categoryCombo = name ,
-                                   category.id = categories
-                            ) , 
-                        by = 'categoryCombo.id'
-                        ) %>%
-        
-            # dataElementGroups
-            left_join( 
-                md$dataElementGroups %>% 
-                    select( name, dataElements) %>%
-                    unnest %>% 
-                    group_by( id ) %>%
-                    summarise( 
-                        Group = paste( name, collapse = " / ")
-                        ) ,
-                by = 'id'
-                ) %>%  
-                  
-            # dataSets              
-            left_join(
-                dsde %>% select( dataElement.id, dataElement, dataSet )  %>%
-                    group_by( dataElement.id , dataElement ) %>%
-                    summarise( 
-                        n_dataSets = n_distinct( dataSet ) ,
-                        dataSets = paste( dataSet, collapse = "; ")
-                        )  , by = c('id' = 'dataElement.id')
-                ) %>%
-         
-        # number reported       
-        left_join( d.mal.reported %>% 
-                       group_by( dataElement.id ) %>%
-                       summarise( 
-                           value = sum( val, na.rm = TRUE ) , 
-                           pVal = max( pVal, na.rm = TRUE )) , 
-                   by = c( "id" = "dataElement.id" )   
-                   
-                   ) %>%
-
-        mutate(  
-            
-            Include = ifelse( pVal>.25, "Y" ,  NA ) ,
-            Reports_Last_Year = as.integer( value )
-            
-            ) %>%
-            
-        select( id, Include, pVal, Reports_Last_Year ,name , dataSets, Group , categoryCombo ) %>%
-        rename( dataElement.id = id, dataElement = name ) %>% 
-        arrange( -pVal,  dataElement )
-            
-
-    )
-    
-    names(l) = names.searches
-
- 
-    if ( file.exists( de.review.xlsx ) ){
-        
-        file.rename( de.review.xlsx , paste0( de.review.xlsx , 
-                                            format(Sys.time(),
-                                                   "%b%d%Y")
-        ))
-        
-        try( openxlsx::write.xlsx( l , de.review.xlsx ) )
-    } 
-    
-    
-```
-
 
 
 # Indicators  {.tabset .tabset-fade} 

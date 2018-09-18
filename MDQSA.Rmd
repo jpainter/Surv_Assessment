@@ -1,15 +1,23 @@
 ---
 title: "DHIS_Review"
-date: "April 6, 2018"
-output: html_document
-
+date: "`r format(Sys.time(), '%b%d%Y')`"
+output: 
+  html_document:
+    code_folding: hide
+    css: custom.css
+    df_print: tibble
+    fig_caption: yes
+    keep_md: yes
+    toc: yes
+    toc_float: yes
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Malawi
+  dhis_instance: kenya
   data_directory:  
   output_directory: ./ # bug: only uses current directory
-  output_format: word_document
+  output_format: html_document
+  display_reports: FALSE 
   create_new: FALSE 
   cache: FALSE
   echo: FALSE
@@ -19,7 +27,7 @@ params:
 ```{r package_list, message=FALSE, include= FALSE, warning= FALSE }
 
 # list of required packages
-    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "geojsonR", "wellknown" , "geojsonio" , "sp" , "rmapshaper" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "tidyverse", "readxl", "knitrProgressBar")
+    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "geojsonR", "wellknown" , "geojsonio" , "sp" , "rmapshaper" , "rgeos" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "tsibble", "seasonal", "forecast", "stlplus",  "gridExtra", "futile.logger", "Hmisc", "pander" , "stringi", "rlang" , "htmltools" , "tidyselect" , "broom" , "ggthemes" , "readxl", "knitrProgressBar" , "tidyverse" )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -44,11 +52,13 @@ source('dhis2_functions.R')
 ```
 
 
-```{r knitr_setup, include = FALSE}
+```{r knitr_setup, include = FALSE }
 knitr::opts_chunk$set( echo = params$echo ,
                        comment = "" ,
+                       warning = FALSE, 
                        cache = params$cache , 
-                       fig.width =  8
+                       fig.width =  8 ,
+                       fig.height = 8
                        )
 
 
@@ -230,6 +240,11 @@ This script creates the review documents by first downloading and cleaning some 
 
 ```{r admins. }
 
+# if no closdeDate, then set to NA
+if ( ! 'closedDate' %in% names( md$organisationUnits ) ){
+    
+    md$organisationUnits$closedDate 
+}
 
 # orgUnits that are polygons (likely admin), and open
 
@@ -340,18 +355,18 @@ clinics = md$organisationUnits %>%
 
 
  # save 
- clinics_file =  paste0( origin.folder , dhis_instance, "_facilities.rds" ) 
+ facilities_file =  paste0( origin.folder , dhis_instance, "_facilities.rds" ) 
  
- if ( file.exists( clinics_file ) & params$create_new ){
+ if ( file.exists( facilities_file ) & params$create_new ){
      
-     file.rename( clinics_file , 
-                  paste0( clinics_file , 
+     file.rename( facilities_file , 
+                  paste0( facilities_file , 
                           format(Sys.time(), "%b%d%Y")
                           )
                   )
  }
  
- if ( !file.exists( clinics_file ) | params$create_new  ) saveRDS( clinics , clinics_file )
+ if ( !file.exists( facilities_file ) | params$create_new  ) saveRDS( clinics , facilities_file )
  
 
 ```
@@ -415,8 +430,10 @@ keep_the_existing_one = FALSE # so, dont download a new one.
 
  if ( ( file.exists( updated_facilities_file ) & !params$create_new ) | keep_the_existing_one ){
      
-     c = readRDS( updated_facilities_file ) %>% 
-         dplyr::select( 1:16 )
+     c = readRDS( updated_facilities_file ) 
+     
+     # trim some unwanted cols
+     if ( ncol( c ) > 16 ) c = c %>% select( 1:16 )
          
  } else {
      
@@ -490,11 +507,11 @@ keep_the_existing_one = FALSE # so, dont download a new one.
 
 ```{r ImputeLocation. }
 
-facilities_file =  paste0( origin.folder , dhis_instance, "_updated_facilities.rds" ) 
 
-if ( file.exists( facilities_file ) )  facilities = readRDS( facilities_file )
+if ( file.exists( updated_facilities_file ) & !params$create_new )  facilities = readRDS( facilities_file )
 
 if ( !exists( "facilities" ) ){
+    
      c.impute = c. %>% 
         filter( 
             !has.coordinates | (!in.parent & !in.parent.fix) , !is.na( parent.name )
@@ -534,18 +551,16 @@ if ( !exists( "facilities" ) ){
              impute = !is.na( long.impute )
              )
      
-      # save 
-     facilities_file =  paste0( origin.folder , dhis_instance, "_updated_facilities.rds" ) 
-     if ( file.exists( facilities_file ) & params$create_new ){ 
+     if ( file.exists( updated_facilities_file ) & params$create_new ){ 
     
-     file.rename( facilities_file , 
-                  paste0( facilities_file ,
+     file.rename( updated_facilities_file , 
+                  paste0( updated_facilities_file ,
                           format(Sys.time(), "%b%d%Y")
                           )
                   )
  }
  
-    saveRDS( c.. , facilities_file )
+    if ( !file.exists( updated_facilities_file ) ) saveRDS( c.. , updated_facilities_file )
  
  }
 
@@ -621,17 +636,6 @@ if ( !exists( "facilities" ) ){
     
     names( searches ) = names.searches 
     
-# perform all searches and count number of hits    
-    search = 
-        map_df( seq_along(searches), 
-                ~data_frame(
-                    Search =   names.searches[.x] ,
-                    search_text = f_rhs( searches[[.x]] ) %>% deparse ,
-                    Count = sum( eval_tidy( searches[[.x]] ) )
-    ))
-    
-    kable( search , row.names = FALSE)
-
 ```
 
 ```{r dataElementReporting }
@@ -669,6 +673,7 @@ if ( !exists( "facilities" ) ){
 
   nde = length( new.dataElements)
   
+  # Get number reported for all elements
   if ( nde > 0 ){
         
         d.reported = api_last12months_national_data( 
@@ -692,14 +697,15 @@ if ( !exists( "facilities" ) ){
 ## Metadata
 
 ```{r Metadata_Review. }
-    output.filename = paste0( output_directory, "/" ,
+    
+  output.filename = paste0( output_directory, "/" ,
                               dhis_instance, "/", 
                              dhis_instance, "_Metadata." ,
                              output.suffix
                              ) 
 
     # rename if exists
-    if ( file.exists( output.filename ) ){
+    if ( file.exists( output.filename ) & params$create_new ){
         
             file.rename( output.filename , 
                     paste0( output.filename , 
@@ -725,22 +731,262 @@ if ( !exists( "facilities" ) ){
          
     }
 
-   if ( file.exists( output.filename )) browseURL( output.filename ) 
+   if ( file.exists( output.filename ) & params$display_reports ){ 
+       
+       browseURL( output.filename ) 
+   }
 
 ```
 
 
 ## Select data elements to review
 
-```{r dataElement_Selection. }
+
+```{r dsde. }
+
+ # data frame of datasets and data elements
+  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
+            ~map_df( md$dataSets$dataSetElements[[.x]], 
+                     ~as.matrix(.x) )) %>%
+    rename( dataElement.id = dataElement , 
+            dataSet.id = dataSet ) %>%
+    left_join( md$dataElements %>% select( id, name ) ,
+               by = c('dataElement.id' = 'id' )) %>%
+    rename( dataElement = name ) %>%
+    left_join( md$dataSets %>% select( id, name ) ,
+               by = c('dataSet.id' = 'id' )) %>%
+    rename( dataSet = name )
+
+# For versions <2.6, need to add categoryCombo
+    if ( !'categoryCombo' %in% names(dsde) ){
+      categoryCombos =  data_frame(
+          dataSet = md$dataSets$id ,
+          categoryCombo = md$dataSets$categoryCombo$id )
+      
+      dsde = dsde %>% inner_join( categoryCombos,  by = "dataSet")
+    }
+
+```
+
+
+```{r d.mal.reported. }
+
+open_ou =     md$organisationUnits %>% 
+    select( id, closedDate) %>%
+    filter( is.na(closedDate) ) %>%
+    select( id )
+
+n_facilities_assigned_to_datasets = md$dataSets %>%
+    select( id, organisationUnits) %>%
+    rename( dataSet.id = id ) %>% 
+    unnest( organisationUnits ) %>%
+    inner_join( open_ou , by = 'id' ) %>%
+    count( dataSet.id ) %>%
+    rename( n_facilities = n )
+    
+# number of options in each catgory combo
+
+options = md$categoryCombos %>% 
+    select( id, categories) %>% 
+    unnest( categories ) %>%
+    rename( categoryCombo = id , category = id1 ) %>%
+    inner_join( md$categories  %>% select( id, categoryOptions ), 
+                by = c('category' = 'id' )
+                ) %>%
+    unnest( categoryOptions ) %>% 
+    count( categoryCombo ) %>%
+    rename( n_options = n )
+
+
+# Select all malaria relevent variables
+malaria.groups = setdiff( names(searches) , c("TB", "imm", "HIV", "opd", "idp") )
+                            
+  all.possible.malaria.de = Reduce(  "|" , map( searches[ malaria.groups ], eval_tidy  ) )
+  # sum( all.possible.malaria.de )
+  
+de.selected = de[ all.possible.malaria.de , display.vars ] 
+
+
+d.mal.reported = d.reported[ , c("dataElement", "value")] %>% 
+    
+    rename( dataElement.id = dataElement ) %>%
+    
+    inner_join(
+
+        count(dsde, dataElement.id, categoryCombo) %>% select(-n),
+
+        by = c("dataElement.id")
+
+        ) %>%
+    
+    left_join(
+        
+        options ,
+        
+        by = 'categoryCombo'
+        
+        ) %>%
+    
+   left_join( 
+       
+       dsde  , 
+       
+       by = 'dataElement.id' 
+       
+       ) %>%
+    
+   left_join( 
+       
+       md$dataSets %>% select( id, name, periodType, timelyDays ) %>%
+           rename( dataSet = name ),
+       
+       by = c( 'dataSet.id' = 'id' )
+       
+       ) %>%
+    
+    left_join( 
+        
+        n_facilities_assigned_to_datasets , by = 'dataSet.id'
+        
+        ) %>%
+
+    mutate( 
+        
+        val = as.integer(value) 
+
+        , frequency = case_when(
+            periodType %in% "Weekly" ~ 52 ,
+            periodType %in% "Monthly" ~ 12 ,
+            periodType  %in% "Quarterly" ~ 4 ,
+            periodType  %in% "Yearly" ~ 1 ,
+            TRUE ~ 1
+        )
+            
+        , pVal = val / (frequency * n_facilities * n_options ) 
+
+            
+        ) %>% 
+    
+    mutate( 
+                Percent_Reported = sprintf("%1.2f%%", 100 * pVal ) 
+                ) 
+
+
+
+# If a data element linked to >1 dataSet, select the one with greatest number of facilities
+    d.mal.reported = d.mal.reported %>%
+        group_by( dataElement.id , dataElement ) %>%
+        arrange( -n_facilities  ) %>%
+        filter(  row_number() == 1 ) %>%
+        arrange( desc(pVal) ) 
+
+   datatable( d.mal.reported , filter = "top")
+```
+
+
+```{r dataElement_spreadsheet}
+
 
     de.review.xlsx = paste0( output_directory , "/" ,
                              dhis_instance , "/" ,
                              dhis_instance , "_" , 
                              "dataElements.xlsx" )
+
+
+  display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
+                                 'categoryCombo', 'id' )
+
+  # Create excel worksheet with separate tab for each search
+
+    l = map( seq_along( searches ) ,
+            
+            ~ de[ eval_tidy( searches[[.x]] )  , display.vars ] %>%
+            rename( categoryCombo.id = categoryCombo ) %>%
+            mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+            
+            # categoryCombos
+            left_join(  
+                select( md$categoryCombos, id, name, categories ) %>%
+                            rename(categoryCombo.id = id,
+                                   categoryCombo = name ,
+                                   category.id = categories
+                            ) , 
+                        by = 'categoryCombo.id'
+                        ) %>%
+        
+            # dataElementGroups
+            left_join( 
+                md$dataElementGroups %>% 
+                    select( name, dataElements) %>%
+                    unnest %>% 
+                    group_by( id ) %>%
+                    summarise( 
+                        Group = paste( name, collapse = " / ")
+                        ) ,
+                by = 'id'
+                ) %>%  
+                  
+            # dataSets              
+            left_join(
+                dsde %>% select( dataElement.id, dataElement, dataSet )  %>%
+                    group_by( dataElement.id , dataElement ) %>%
+                    summarise( 
+                        n_dataSets = n_distinct( dataSet ) ,
+                        dataSets = paste( dataSet, collapse = "; ")
+                        )  , 
+                by = c('id' = 'dataElement.id')
+                ) %>%
+         
+        # number reported       
+        left_join( d.mal.reported %>%
+                       group_by( dataElement.id ) %>%
+                       summarise( 
+                           value = sum( val, na.rm = TRUE ) , 
+                           pVal = max( pVal, na.rm = TRUE )) , 
+                   by = c( "id" = "dataElement.id" )   
+                   
+                   ) %>%
+
+        mutate(  
+            
+            Include = ifelse( pVal>.25, "Y" ,  NA ) ,
+            Reports_Last_Year = as.integer( value )
+            
+            ) %>%
+            
+        select( id, Include, pVal, Reports_Last_Year ,name , dataSets, Group , categoryCombo ) %>%
+        rename( dataElement.id = id, dataElement = name ) %>% 
+        arrange( -pVal,  dataElement )
+            
+
+    )
     
+    names(l) = names.searches
+
+ 
+    if ( file.exists( de.review.xlsx ) & params$create_new ){
+        
+        file.rename( de.review.xlsx , paste0( de.review.xlsx , 
+                                            format(Sys.time(),
+                                                   "%b%d%Y")
+        ))
+        
+        try( openxlsx::write.xlsx( l , de.review.xlsx ) )
+    
+    } 
+    
+
+```
+
+```{r dataElement_Selection. }
+
+  
     # if exist, open excel file
-    if ( file.exists( de.review.xlsx ) )  browseURL( de.review.xlsx )
+    if ( file.exists( de.review.xlsx ) & params$display_reports == TRUE ){
+        
+        browseURL( de.review.xlsx )
+        
+    }  
     
     
 ```
@@ -748,7 +994,203 @@ if ( !exists( "facilities" ) ){
 ## Data
 
 
-```{r data_Review.  }
+
+```{r data_elements_include. }
+
+
+    de.review.xlsx = paste0( output_directory , "/" ,
+                             dhis_instance , "/" ,
+                             dhis_instance , "_" , 
+                             "dataElements.xlsx" ) 
+
+    sheets = excel_sheets( de.review.xlsx ) 
+    
+    use_these_sheets = sheets %in% c( "malaria_stock", "stock", "pop", "attendance", "opd" ,
+                                      "ipd" , "malaria_items")
+    
+    target_sheets = sheets[ use_these_sheets ]  
+    
+    # get selected rows from every spreadsheet tab
+    de.include = map_df(  seq_along( target_sheets ) , 
+                         ~readxl::read_xlsx( de.review.xlsx ,  sheet = target_sheets[.x] ) %>% 
+                             filter( !is.na(Include) ) ) %>%
+        
+        distinct( dataElement.id, .keep_all = TRUE )
+
+    # if none selected, pick intersection of malaria and confirmed 
+    if ( nrow( de.include) == 0 ){
+        
+        de.include = read_rds( paste0( origin.folder ,
+                               dhis_instance, 
+                               "_key_data_elements.rds" ) 
+                            ) 
+            
+    }
+
+```
+
+
+```{r}
+  # levels
+  levels = character()
+    
+  for ( i in seq_along( md$organisationUnitLevels$id) ){
+    
+        levels =  c(levels, paste0("LEVEL-", i) )
+      }
+      
+  levels = paste( levels, collapse = ";")
+  
+  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+
+```
+
+
+## Request Data Totals 
+
+```{r data_totals}
+  
+    data.totals.file = paste0( origin.folder , 
+                     dhis_instance, 
+                     "_dataset_totals.rds" )
+
+    nde = nrow( de.include )
+
+    if ( nde > 0 & params$create_new | !file.exists( data.totals.file ) ){
+    
+        data_totals = api_data( 
+            
+            levels = levels.vector , 
+            de.vars = de.include ,
+            file = data.totals.file ,
+            details = FALSE , 
+            submissions =  FALSE )
+        
+        print( paste( "TOTAL:", 
+                       scales::comma( nrow( data_totals ) ) , 
+                       "records"  ) )
+    
+    } else {
+        
+        data_totals = readRDS( data.totals.file )
+    }
+    
+    if ( file.exists( data.totals.file ) & params$create_new ){
+        
+        file.rename( data.totals.file ,
+                     paste( data.totals.file ,
+                            format( Sys.time(), "%b%d%Y" )
+                            )
+                     )
+    }
+    
+    if ( !file.exists( data.totals.file) ) saveRDS( data_totals , data.totals.file )
+        
+    # get date
+    data_totals_date = file.info( data.totals.file )$mtime
+        
+
+```
+
+
+## Request Data Details 
+
+```{r data_details}
+## DataElements : details 
+
+    data.details.file = paste0( origin.folder , 
+                     dhis_instance, 
+                     "_dataset_details.rds" )
+
+    nde = length( de.include )
+
+    if ( nde > 0 & params$create_new | !file.exists( data.details.file )  ){
+            
+        data_details = api_data( 
+            
+            levels = levels.vector , 
+            de.vars = de.include ,
+            file = data.details.file ,
+            details = TRUE , 
+            submissions =  FALSE 
+            
+            )
+        
+        print( paste( "TOTAL:", 
+                  scales::comma( nrow( data_details ) ) , 
+                  "records"  ) )
+    
+    }
+    
+    if ( file.exists( data.details.file ) & params$create_new ){
+        
+        file.rename( data.details.file ,
+                     paste( data.details.file ,
+                            format( Sys.time(), "%b%d%Y" )
+                            )
+                     )
+    }
+    
+    if ( !file.exists( data.details.file) ) saveRDS( data_details , data.details.file )
+    
+    
+    data_details = readRDS( data.details.file )   
+    
+    
+    # get date
+    data_details_date = file.info( data.details.file )$mtime
+        
+
+```
+
+
+## Request Data Completeness 
+
+
+```{r download_dataset_submissions. }
+## DataElements : details 
+
+  dataset.submission.file = paste0( origin.folder , 
+                     dhis_instance ,  
+                     "_dataset_submissions.rds" )
+
+    if ( !file.exists( dataset.submission.file ) | params$create_new ){
+            
+        data_submissions = api_data( 
+                                levels = levels.vector , 
+                                de.vars = de.include ,
+                                file = dataset.submission.file ,
+                                dsde = dsde ,
+                                details = FALSE , 
+                                submissions =  TRUE )
+        
+    } else {
+        
+        data_submissions = readRDS( dataset.submission.file ) 
+        
+    }         
+          
+    
+   # Rename existing file
+   if ( file.exists( dataset.submission.file ) & params$create_new ){
+        
+        file.rename( dataset.submission.file ,
+                     paste( dataset.submission.file ,
+                            format( Sys.time(), "%b%d%Y" )
+                            )
+                     )
+    }
+    
+    # save new
+    if ( !file.exists( dataset.submission.file) ) saveRDS( data_submissions , dataset.submission.file )
+
+    # get date
+    data_submissions_date = file.info( dataset.submission.file )$mtime
+
+```
+
+
+```{r display_data.  }
 
     output.filename = paste0( output_directory, "/" ,
                               dhis_instance, "/", 
@@ -757,7 +1199,7 @@ if ( !exists( "facilities" ) ){
                              ) 
 
 
-    if ( file.exists( output.filename ) ){
+    if ( file.exists( output.filename ) & params$create_new ){
         
             file.rename( output.filename , 
                     paste0( output.filename ,
@@ -769,7 +1211,7 @@ if ( !exists( "facilities" ) ){
 
     if ( !file.exists( output.filename ) ) { 
 
-        rmarkdown::render( 'Review_Data.Rmd' ,
+        rmarkdown::render( 'Display_Data.Rmd' ,
                            
            output_file = paste0( output.filename  ),
            output_format = output_format ,
@@ -784,6 +1226,686 @@ if ( !exists( "facilities" ) ){
 
    # open file
 
-   if ( file.exists( output.filename )) browseURL( output.filename ) 
+   if ( file.exists( output.filename ) &  params$display_reports ) {
+       
+       browseURL( output.filename ) 
+       
+   }
 
 ```
+
+
+
+## Trends
+
+## Quantitative Quality
+
+```{r}
+source( "Trend code/Trend_Code.R")
+
+updated_facilities_file =  paste0( origin.folder , 
+                            dhis_instance,
+                            "_updated_facilities.rds" 
+                            ) 
+
+# use updated ous
+ous.updated = readRDS( updated_facilities_file ) %>% 
+    rename( orgUnit = id, orgUnit.name = name , feature = feature_type ,
+            parent_ou = parent.id , parent_ou.name = parent.name
+    ) %>%
+    mutate( lat = lat. , long = long. )
+
+# add level.name if missing
+if ( !"level.name" %in% names( ous.updated ) ){
+    
+    ous.updated = ous.updated %>%
+        left_join( 
+            md$organisationUnitLevels[ , c('level', 'name')] %>% 
+                rename( level.name = name ) ,
+            by = 'level' 
+            )
+}
+
+# glimpse(ous.updated)
+# names(ous.updated)
+# imputed.ous = ous.updated %>% filter( impute == TRUE ) %>% .$orgUnit
+
+ous = ous.translated( .meta = md )
+
+# names(ous)
+
+# ous = ous %>% left_join( ous.updated %>% 
+#                              select( orgUnit, lat, long, impute ) ,
+#                          by = 'orgUnit'
+# )
+
+```
+
+
+```{r translate_data_details}
+
+
+d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
+    left_join( ous.updated %>% select( orgUnit , lat , long , impute ) , 
+               by = 'orgUnit'
+               )  %>%
+    # combine data element with category option combo
+    unite( de.coc, dataElement, categoryOptionCombo ) %>%
+    unite( de.coc.name , dataElement.name , categoryOptionCombo.name ) 
+
+# glimpse(d)
+# count( d, level )
+# count( d, feature , level )
+# count( d, de.coc.name )
+
+```
+
+
+```{r nest.dec }
+
+  nest.dec_file = paste0( origin.folder ,
+                           dhis_instance, 
+                           "_nest.dec.rds" ) 
+
+
+     if ( file.exists( nest.dec_file) & !params$create_new ){
+          
+          d.nest.dec = readRDS( nest.dec_file )
+      }
+
+    if ( file.exists( meta_data_file) & params$create_new  ){ 
+        
+        file.rename( nest.dec_file ,
+                     paste0( nest.dec_file , 
+                             format(Sys.time(), "%b%d%Y")
+                                                        )
+                     )
+    }
+
+  if ( (!exists( "d.nest.dec") | params$create_new ) ) {
+      
+      
+    d.nest = d %>% 
+        complete( nesting(orgUnit, de.coc.name, period) ) %>%
+        mutate( value = as.integer( value ) ) %>%
+        group_by( level, level.name, feature, orgUnit ,  orgUnit.name , lat, long , 
+                  parent_ou.name ,  de.coc.name ) %>%
+        nest( period, value ) 
+    
+    # glimpse( d.nest )
+    
+    pb <- progress_estimated( nrow( d.nest ) )
+    
+    d.nest.dec = d.nest %>% 
+        mutate( 
+            ts = map( data,   ~ts.df(.x)  ) ,
+            n = map_dbl( ts, ~sum( !is.na(.x) ) ) ,
+            total = map_dbl( ts , ~sum( .x, na.rm =  TRUE ) ) ,
+            dec = map_dbl( ts, 
+                       ~decompose.stl( .x , transform = "log", 
+                                       plot = FALSE, .pb = pb )  
+                       )
+            ) 
+    
+ 
+    saveRDS( d.nest.dec ,  nest.dec_file  )
+
+}
+
+```
+
+
+```{r nest.dec_summary_by_element }
+
+  nest.dec_file = paste0( origin.folder ,
+                           dhis_instance, 
+                           "_nest.dec.rds" ) 
+
+  d.nest.dec = readRDS( nest.dec_file )
+
+
+  # Summary by element 
+  d.nest.dec %>%
+      group_by( de.coc.name , level.name ) %>%
+      summarise(
+          # n = n()  ,
+          wt.mean = weighted.mean( dec , total , na.rm = TRUE )
+      ) %>%
+      spread( level.name, wt.mean ) %>% pander
+  
+```
+
+
+```{r choose.dec.data.element }
+
+# choose data element ####
+de.coc.all = unique(d$de.coc.name)
+
+de.coc.selected = de.coc.all[26] # "HMIS Malaria – New Case (under 5)"
+
+
+# model d.nest for selected element/catoegory: "HMIS Malaria – New Case (under 5)" ####
+x.dec = d.nest.dec %>% filter( de.coc.name %in% de.coc.selected )
+
+```
+
+## Percent Increase Attributable to Added Facilities
+
+```{r}
+
+# x.dec$months = cut(x.dec$n , breaks = c(0,12,24,36,48))
+
+x.dec %>% filter( feature %in% "Point") %>%
+  mutate( period = cut(n, breaks = 5, pretty = T) ) %>%
+  ggplot() +  
+  geom_boxplot( aes( x = period , y = total/n ) ) +
+  scale_y_log10() 
+
+
+x.dec %>% filter( feature %in% "Point") %>%
+  group_by( orgUnit , n )  %>%
+  summarise( mean = total/n ) %>%
+  ggplot() +  
+  geom_point( aes( x = n , y = mean )   ) +
+  scale_y_log10() +
+  scale_x_continuous( limits = c(0,48))
+
+```
+
+## Aggregations
+
+```{r}
+# summarise time-series lengths by parent
+
+x.dec %>% group_by( parent_ou.name ) %>%
+  summarise( r1 = range(n)[1] ,
+             r2 = range(n)[2] ,
+             mean_n = mean( n ) ,
+             num = n(),
+             mean_dec = mean( dec , na.rm = T)
+             
+             ) %>%
+  View
+
+```
+
+
+Table of District level Error
+
+```{r}
+tsd.parent = x.dec %>% 
+  filter( feature %in% "Polygon" ) %>%
+  dplyr::select( orgUnit.name , level , total, dec )
+
+```
+
+
+```{r}
+
+library(ggfortify)
+
+tsd =  x.dec %>% 
+  filter( feature %in% "Point" , 
+          parent_ou.name %in% "Chitipa-DHO" ) 
+
+summary( tsd$dec )
+
+ggplot( ) + geom_histogram( data = tsd , aes( x = dec )) 
+
+tsd.parent = x.dec %>% 
+  filter( feature %in% "Polygon" , 
+          orgUnit.name %in% "Chitipa-DHO" ) 
+tsd.parent$dec
+
+
+a = NULL
+nf = nrow( tsd )
+for ( i in 1:nf ){
+  a = cbind( a, tsd$ts[[i]])  
+}
+
+autoplot( a , facets = FALSE , legend = FALSE, ts.size = 2 ) +
+  labs( y = "Case Counts\n", x = "\nMonth") +
+  theme_bw() +
+  theme( legend.position = 'none' , panel.border=element_blank() ) +
+  theme(axis.ticks=element_blank() ,
+          axis.title=element_text(size = 16, face = "bold") ,
+          axis.text=element_text(size = 14, face = "bold") 
+          )
+
+```
+
+## Forecast 
+
+```{r}
+ library( vars )
+library( forecast )
+
+autoplot( tsd.parent$ts[[1]] , facets = FALSE , legend = FALSE, ts.size = 1 ) +
+  labs( y = "Case Counts\n", x = "\nMonth") +
+  theme_bw() +
+  theme( legend.position = 'none' , panel.border=element_blank() ) +
+  theme(axis.ticks=element_blank() ,
+          axis.title=element_text(size = 16, face = "bold") ,
+          axis.text=element_text(size = 14, face = "bold") 
+          )
+
+autoplot( d.forecast <- forecast(tsd.parent$ts[[1]] , h = 12, level = c(80) ),  ts.size = 1 ,
+          predict.colour = 'blue', predict.linetype = 'dashed') +
+  labs( y = "Case Counts\n", x = "\nMonth") +
+  theme_bw() +
+  theme( legend.position = 'none' , panel.border=element_blank() ) +         theme(axis.ticks=element_blank() ,
+          axis.title=element_text(size = 16, face = "bold") ,
+          axis.text=element_text(size = 14, face = "bold") 
+          )
+
+
+```
+
+- higher quality examples
+
+```{r}
+tsd =  x.dec %>% 
+  filter( feature %in% "Point" , 
+          parent_ou.name %in% "Mulanje-DHO" ) 
+
+# summary( tsd$dec )
+ggplot( ) + geom_histogram( data = tsd , aes( x = dec )) 
+
+tsd.parent = x.dec %>% 
+  filter( feature %in% "Polygon" , 
+          orgUnit.name %in% "Mulanje-DHO" ) 
+tsd.parent$dec
+
+
+a = NULL
+nf = nrow( tsd )
+for ( i in 1:nf ){
+  a = cbind( a, tsd$ts[[i]])  
+}
+
+autoplot( a , facets = FALSE , legend = FALSE, ts.size = 1 ) +
+  theme_bw() +
+  theme( legend.position = 'none' , panel.border=element_blank() ) +
+  theme(axis.ticks=element_blank() ,
+          axis.title=element_text(size = 16, face = "bold") ,
+          axis.text=element_text(size = 14, face = "bold") 
+          ) 
+
+autoplot( tsd.parent$ts[[1]] , facets = FALSE , legend = FALSE, ts.size = 1) +
+  theme_bw() +
+  theme( legend.position = 'none' , panel.border=element_blank() ) +
+  theme(axis.ticks=element_blank() ,
+          axis.title=element_text(size = 16, face = "bold") ,
+          axis.text=element_text(size = 14, face = "bold") 
+          ) 
+
+
+autoplot( d.forecast <- forecast(tsd.parent$ts[[1]] , h = 12, level = c(95) ),  ts.size = 1 ,
+          predict.colour = 'blue', predict.linetype = 'dashed') +
+  labs( y = "Case Counts\n", x = "\nMonth") +
+  theme_bw() +
+  theme( legend.position = 'none' , panel.border=element_blank() ) +         theme(axis.ticks=element_blank() ,
+          axis.title=element_text(size = 16, face = "bold") ,
+          axis.text=element_text(size = 14, face = "bold") 
+          )
+
+ 
+```
+
+# Data quality histograms
+
+```{r x.dec_histogram }
+
+instance = params$dhis_instance
+
+quality_histogram = function( element = NULL , 
+                              d.nest.dec. = d.nest.dec ,
+                              subtitle = instance ,
+                              .pb = NULL ){
+    
+    # progress bar
+    update_progress( .pb ) 
+    
+    x.dec = d.nest.dec. %>% filter( de.coc.name %in% element )
+
+    x.dec$quality = cut( x.dec$dec, breaks = c( 0, .5, 1 , 2, Inf) , labels = letters[1:4] )
+    
+    x.dec = x.dec %>% arrange( level )
+    
+    # Change names for Kenya.demo
+    if ( params$dhis_instance %in% 'Kenya.demo' ){
+        
+        kenya.labels = c( 'National' , 'Region', "District", "Sub-District" , "Ward" , "Facility", "Community" )
+        
+        kenya.levels = c( 'National' , 'SNU1', "SNU2", "SNU3" , "SNU4" , "Facility", "Community" )
+    
+    
+    x.dec$level.name = factor( x.dec$level.name, 
+                               levels = kenya.levels ,
+                               labels = kenya.labels ,
+                               ordered = TRUE )
+    
+    
+    }
+    
+    hist = x.dec %>% ggplot() + 
+            geom_bar( aes(quality)  ) + 
+            scale_x_discrete( 'Quality' , drop = FALSE ) +
+            facet_wrap(~level.name, scales = 'free' ) +
+            labs( title = element , subtitle = subtitle  )
+    
+    print( hist )
+}
+
+
+n_elements = length( de.coc.all )
+
+pb = progress_estimated(n_elements)
+
+# h = map( 1:n_elements  , ~quality_histogram( de.coc.all[.x] , .pb = pb) )
+# 
+# map( 1:n_elements , ~h[[.x]] )
+# 
+# walk( 1:n_elements , ~modify_depth( h[[.x]] , .depth = 0 , print ) )
+
+walk( 1:n_elements , ~quality_histogram( de.coc.all[.x] , .pb = pb) )
+
+```
+
+
+# Quality Leaflet
+
+```{r map.dec }
+
+radius_factor = 1e4
+
+quality_leaflet = function( element = NULL , 
+                            d.nest.dec. = d.nest.dec ,
+                            subtitle = instance ,
+                            .pb = NULL ,
+                            radius_factor = 1e4 ,
+                            title.on.map = FALSE 
+                            ){
+    
+    x.dec = d.nest.dec. %>% filter( de.coc.name %in% element )
+    
+    x.dec$quality = cut( x.dec$dec, 
+                         breaks = c( 0, .5, 1 , 2, Inf) , 
+                         labels = letters[1:4] )
+    
+    
+    region.dec = x.dec %>% filter( level == 2 , feature %in% 'Polygon' )
+    
+    regions = admins[ match( region.dec$orgUnit, admins$id ), ]$polygons 
+    
+    map.region = SpatialPolygonsDataFrame( regions , region.dec,
+                                               match.ID = FALSE )
+        
+    district.dec = x.dec %>% filter( level == 3 , feature %in% 'Polygon' ) 
+    
+    if ( all( is.na( district.dec$dec )) ) return()
+        
+    districts = admins[ match( district.dec$orgUnit, admins$id ),
+                        ]$polygons 
+    
+    
+    map.district = SpatialPolygonsDataFrame( districts , district.dec,
+                                             match.ID = FALSE )
+    
+        
+    
+    x.facilities = x.dec %>% filter( feature %in% 'Point' )
+    
+    if ( all( is.na( x.facilities$quality ) ) ) return()
+        
+    
+    binpal <- colorBin( brewer.pal( 5, "Reds"), 
+                        domain = map.district$dec , bins =5, 
+                        na.color = "#bdbdbd", pretty = TRUE
+        )
+        
+    factpal <- colorFactor( 
+            c('dark red','orange','yellow','dark green'), 
+            x.facilities$quality , reverse = TRUE )
+        
+    
+    radius_factor = mean( x.facilities$total , na.rm = T) * 3
+        
+        # Find a center point for each region
+        centers.region <- data.frame(gCentroid(map.region, byid = TRUE))
+        centers.region$name <- map.region$orgUnit.name
+        centers.region$dec <- map.region$dec
+        
+        centers.district <- data.frame(gCentroid(map.district, byid = TRUE))
+        centers.district$name <- map.district$orgUnit.name
+        centers.district$dec <- map.district$dec
+        
+        # title
+        tag.map.title <- tags$style(HTML("
+          .leaflet-control.map-title { 
+            transform: translate(-50%,20%);
+            position: fixed !important;
+            left: 50%;
+            text-align: center;
+            padding-left: 10px; 
+            padding-right: 10px; 
+            background: rgba(255,255,255,0.5);
+            font-weight: bold;
+            font-size: 28px;
+            width: 100%;
+          }
+        "))
+
+        title <- tags$div(
+          tag.map.title, HTML( element )
+        )  
+        
+    regionMap = leaflet() %>%
+            
+        addTiles(  urlTemplate = 
+                           "http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            )  %>% 
+            
+        addPolygons( data = map.region ,
+                         group = 'Region' ,
+                         color = "black",
+                         weight = 1 ,
+                         opacity = 1 ,
+                         # label = ~paste( scales::percent(dec) ),
+                         # labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE, textsize = "14px") ,
+                         popup = ~paste( orgUnit.name , percent( dec ) )  ,
+                         fillColor =  ~binpal(dec),
+                         fillOpacity = .5
+            ) %>%
+        addPolygons( data = map.district ,
+                         group = 'District' , 
+                         color = "black", 
+                         weight = 1 , 
+                         opacity = 1 ,
+                         # label = ~paste( scales::percent(dec) ),
+                         # labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE, textsize = "14px") ,
+                         popup = ~paste( orgUnit.name  , percent( dec ) )  ,
+                         fillColor =  ~binpal(dec),
+                         fillOpacity = .5
+            ) %>%
+            
+        addCircleMarkers( data =  x.facilities , 
+                              ~long , ~lat , 
+                              radius = ~total/ radius_factor  , 
+                              fillColor = ~factpal( quality ) ,
+                              fillOpacity = 1 , 
+                              weight = 1 ,
+                              group = 'Facilities' ,
+                              color = 'black' ,
+                              opacity = .5 ,
+                              popup = ~paste( orgUnit.name, "total:" , comma(total) ,
+                                              "quality:" , percent( dec ) ) 
+                              ) %>%
+            
+        addLabelOnlyMarkers(data = centers.district,
+                                # group = 'District' ,
+                                lng = ~x, lat = ~y, label = ~dec,
+                                labelOptions = labelOptions(noHide = F, textOnly = TRUE, textsize = "15px" )
+                                
+                                ) %>% 
+            
+        addLegend(position = "bottomright", pal = binpal, 
+                      values = map.district$dec,
+                      title = "Quality",
+                      opacity = 1 ) %>%
+            
+        addLegend(position = "bottomright", group = "Facilities" , 
+                      pal = factpal , values = x.facilities$quality,
+                      title = "Facilties",
+                      opacity = 1 ) %>%
+         
+            # Layers control
+        addLayersControl(
+                overlayGroups = c("Region", "District", 'Facilities'), 
+                # options = layersControlOptions(collapsed = FALSE),
+                position = "topright"
+            ) 
+        
+        if ( title.on.map ){  
+            
+            regionMap = regionMap %>% addControl( title, 
+                                         position = "topleft",
+                                         className="map-title" 
+                                         )
+        }
+                         
+        print( regionMap )
+}
+
+
+n_elements = length( de.coc.all )
+
+# pb = progress_estimated(n_elements)
+
+# l = map( 1:n_elements  , ~quality_leaflet( de.coc.all[.x] , .pb = pb) )
+
+# walk( 1:n_elements , ~quality_leaflet( de.coc.all[.x] , .pb = pb) )
+
+```
+
+
+```{r , results='as.is' }
+
+n_elements = length( de.coc.all )
+
+html <- list()
+
+for (i in 1:n_elements) {
+    
+  html <- c( html, 
+             list( h3( paste0( de.coc.all[i] 
+                               , "(", i, ")" 
+                       ) ),
+                 
+                 quality_leaflet( de.coc.all[i] )
+                 
+                 )
+  )
+                 
+}
+
+tagList(html)
+
+# saveRDS( html, paste("leaflet", i , ".html" ) )
+
+```
+
+
+# Quality GGPLOT
+
+```{r ggplot_map }
+
+
+
+quality_ggMap = function( element = NULL , 
+                            d.nest.dec. = d.nest.dec ,
+                            subtitle = instance ,
+                            .pb = NULL,
+                            radius_factor = 1e4 
+                          ){
+    
+    x.dec$quality = cut( x.dec$dec, breaks = c( 0, .5, 1 , 2, Inf) , 
+                         labels = c('Best','Good', 'Sub-Standard', 'Poor') )
+    
+    x.facilities = x.dec %>% filter( feature %in% 'Point' )
+    
+    region.index = which( x.dec$level == 2 & 
+                              x.dec$feature %in% 'Polygon'   )
+    
+    region.dec = x.dec[ region.index ,] %>% 
+        select( level, feature, orgUnit, orgUnit.name,
+                de.coc.name, n, total, dec, quality )
+    
+    # get admin polygons
+    regions.polys = admins[ match( region.dec$orgUnit, admins$id ),
+                            ]$polygons 
+    
+    # assign orgunit id to each polygon
+    region.id = region.dec$orgUnit 
+    for (i in 1:length(region.id) ){
+      slot(slot( regions.polys, "polygons")[[i]], "ID") = region.id[i]
+    }
+    
+    # convert from SP polygons to list of coordinates; data is not carried over
+    regions.g = regions.polys %>% broom::tidy(.) %>% rename( orgUnit = id )
+    
+    # Add data back to coordinates
+    regions.g.df = left_join( regions.g, region.dec, by = "orgUnit" )
+    
+    # glimpse(regions.g)
+    
+    district.dec = x.dec %>% filter( level == 3 , feature %in% 'Polygon' ) 
+    districts = admins[ match( district.dec$orgUnit, admins$id ),
+                        ]$polygons 
+    map.district = SpatialPolygonsDataFrame( districts , district.dec,
+                                             match.ID = FALSE )
+    
+    map.g = ggplot( regions.g.df ) + 
+      aes( long, lat ) + 
+      geom_polygon( aes( group=group, 
+                         fill = cut(dec, 
+                                    breaks = c(0,.15,.25, .5, Inf)) 
+                         ) 
+                    ) +
+      geom_path(color="white") +
+      geom_point( data = x.facilities , 
+                  aes( color = quality , size = total / radius_factor )
+                  ) +
+      coord_equal() +
+      theme_map() +
+      theme( legend.justification = c(1, 0), legend.position = 'right' ) +
+      scale_fill_brewer( "Region", drop = FALSE, palette = 'Reds' ) +
+      scale_color_brewer( "Facility", drop = FALSE, type = 'div'  ) +
+      scale_size_continuous( guide = FALSE )
+    
+    print( map.g )
+    
+}
+
+```
+
+```{r print_ggplots }
+
+n_elements = length( de.coc.all )
+
+pb = progress_estimated(n_elements)
+
+# h = map( 1:n_elements  , ~quality_histogram( de.coc.all[.x] , .pb = pb) )
+# 
+# map( 1:n_elements , ~h[[.x]] )
+# 
+# walk( 1:n_elements , ~modify_depth( h[[.x]] , .depth = 0 , print ) )
+
+walk(  1:n_elements , ~quality_ggMap( de.coc.all[.x] , .pb = pb) )
+
+```
+
+
+
+

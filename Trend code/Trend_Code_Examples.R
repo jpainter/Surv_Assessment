@@ -2,6 +2,7 @@
 
 library( tidyverse )
 library( lubridate )
+library( knitrProgressBar )
 
 
 source( "Trend code/Trend_Code.R")
@@ -18,20 +19,35 @@ meta = readRDS( "Malawi/Malawi_metadata.rds")
 # ous = ous.translated( meta , open.only = FALSE)
 
 # use updated ous
-ous = readRDS( "Malawi/Malawi_updated_facilities.rds") %>% 
+ous.updated = readRDS( "Malawi/Malawi_updated_facilities.rds") %>% 
     rename( orgUnit = id, orgUnit.name = name , feature = feature_type ,
             parent_ou = parent.id , parent_ou.name = parent.name
-    )
+    ) %>%
+    mutate( lat = lat. , long = long. )
+
+glimpse(ous.updated)
+names(ous.updated)
+imputed.ous = ous.updated %>% filter( impute == TRUE ) %>% .$orgUnit
+
+ous = ous_from_metatdata( meta ) %>%
+    select( -shortName , -created , -lastUpdated, -level.name ) %>%
+    rename( orgUnit = id, parent_ou = parent.id )
+names(ous)
+
+
+ous[ imputed.ous , ] = ous.updated[ imputed.ous , names(ous)]
+
 
 glimpse( ous )
 count( ous, level, feature  )
 count( ous, parent_ou.name )
 
 d = dataset.translated( malawi, .ous = ous , .meta = meta  ) %>%
-    
+    left_join( ous.updated %>% select( orgUnit , lat , long ) , by = 'orgUnit')  %>%
     # combine data element with category option combo
     unite( de.coc, dataElement, categoryOptionCombo ) %>%
     unite( de.coc.name , dataElement.name , categoryOptionCombo.name ) 
+
 
 glimpse(d)
 count( d, level )
@@ -53,7 +69,7 @@ de.coc.selected = de.coc.all[7] # "HMIS Malaria – New Case (under 5)"
 d.nest = d %>% 
     complete( nesting(orgUnit, de.coc.name, period) ) %>%
     mutate( value = as.integer( value ) ) %>%
-    group_by( level, feature, orgUnit ,  orgUnit.name , lat., long. , parent_ou.name ,  de.coc.name ) %>%
+    group_by( level, feature, orgUnit ,  orgUnit.name , lat, long , parent_ou.name ,  de.coc.name ) %>%
     nest( period, value ) 
     
 glimpse( d.nest )
@@ -80,7 +96,7 @@ x.dec = x %>%
                    ) 
         )
 
-count(x.dec, level )
+count(x.dec, level, feature )
     
 summary( x.dec$dec  )
 
@@ -94,16 +110,56 @@ x.dec$quality = cut( x.dec$dec, breaks = c( 0, .5, 1 , 2, Inf) , labels = letter
 count( x.dec, quality )
 ggplot( x.dec ) + geom_histogram( aes( dec ), binwidth = .1 ) + facet_wrap( ~quality , scales = 'free')
 
+# Overall histo
+gg = ggplot( x.dec ) + 
+    geom_histogram( aes( dec ), binwidth = .1 ) + 
+    scale_x_continuous(limits = c(0,2)) 
+gg <- gg + labs( x='\n Coefficient of Variation', y='Count \n')
+gg <- gg + theme_bw()
+gg <- gg + theme(panel.grid.minor=element_blank())
+gg <- gg + theme(panel.grid.major.y=element_blank())
+gg <- gg + theme(panel.grid.major.x=element_line())
+gg <- gg + theme(axis.ticks=element_blank() ,
+                 axis.title=element_text(size = 16, face = "bold") ,
+                 axis.text=element_text(size = 14, face = "bold") )
+gg <- gg + theme( legend.position="none" )
+gg <- gg + theme( panel.border=element_blank() )
+gg
+ggsave( 'cv_histogram.png' , width = 6, height = 4 )
+
+# histo by level
+gg = x.dec %>% ggplot() + 
+    geom_histogram(aes(quality), stat = 'count') + 
+    facet_wrap(~level)
+gg <- gg + labs( x='\n Score', y='Count \n')
+gg <- gg + theme_bw()
+gg <- gg + theme(panel.grid.minor=element_blank())
+gg <- gg + theme(panel.grid.major.y=element_blank())
+gg <- gg + theme(panel.grid.major.x=element_line())
+gg <- gg + theme(axis.ticks=element_blank() ,
+                 axis.title=element_text(size = 16, face = "bold") ,
+                 axis.text=element_text(size = 14, face = "bold") )
+gg <- gg + theme( legend.position="none" )
+gg <- gg + theme( panel.border=element_blank() )
+gg
+ggsave( 'cv_histogram_levels.png' , width = 6, height = 4 )
+
+
 # plot dec by wt
 ggplot( x.dec ) + geom_point( aes( x = total, y = dec , color = factor(level) ), alpha = .3 )
 
-# EXAMOES ####
+# EXAMPLES ####
 # show example dec:  LOW 
 low_dec = which( x.dec$dec < .15 )
 length( low_dec )
+
+ous_ids = x.dec$orgUnit[low_dec]
+ous_names = x.dec$orgUnit.name[low_dec]
+
 pick_one = sample( low_dec , 1 ) 
-sample_dec( index = pick_one , method = 'stl' )
-sample_dec( index = pick_one , method = 'seas' )
+
+sample_dec( index = 1700 , method = 'stl' )
+sample_dec( index = 1700 , method = 'seas' )
 sample_dec( index = pick_one , method = 'seas', smooth = TRUE , impute = TRUE )
 
 
@@ -111,14 +167,14 @@ sample_dec( index = pick_one , method = 'seas', smooth = TRUE , impute = TRUE )
 med_dec = which( x.dec$dec >  .15 & x.dec$dec < .75 )
 length( med_dec )
 pick_one = sample( med_dec , 1 ) 
-sample_dec( index = pick_one )
+sample_dec( index = pick_one  , method = 'seas' )
 
 
 # show example dec:  HIGH 
 high_dec = which( x.dec$dec > .75 )
 length( high_dec )
 pick_one = sample( high_dec , 1 ) 
-sample_dec( index = pick_one )
+sample_dec( index = pick_one , method = 'seas' )
 
 # show example dec:  UNCONTROLLED 
 high_dec = which( x.dec$dec > 2 & x.dec$total > 100 )
@@ -131,6 +187,53 @@ sample_dec( index = pick_one , method = 'seas' )
 sample_dec( index = pick_one , method = 'seas' , year = 2015 )
 sample_dec( index = pick_one , method = 'seas',  impute = TRUE , zero_as_missing = TRUE )
 sample_dec( index = pick_one , method = 'seas',  impute = TRUE , zero_as_missing = TRUE , detect_outliers = TRUE)
+
+### FIxed seasonal==use seasonal from time series a and appliy it to timeseries b ####
+
+# TODO: look at seasonal curve by region.  Is it smooth; is it ~same in each region? Does time-period change?
+pick_one.a = sample( low_dec , 1 ) 
+df.a  = x.dec[ pick_one.a , ]$ts[[1]]
+df.name = paste(  data$parent_ou.name[ pick_one.a ]  , " : " ,
+                  data$orgUnit.name[ pick_one.a ] , " (Total Cases = " ,
+                  scales::comma( data$total[ pick_one.a ] ), ")" )
+seas_df.a = decompose.seas( df.a  , transform = "log" , title = df.name )
+seasonal = seas_df.a[[1]][[1]]$data %>% as_data_frame() %>% .$seasonal %>% as.double()
+
+pick_one.b = sample( low_dec , 1 ) 
+df.b  = x.dec[ pick_one.b , ]$ts[[1]]
+df.name = paste(  data$parent_ou.name[ pick_one.b ]  , " : " ,
+                  data$orgUnit.name[ pick_one.b ] , " (Total Cases = " ,
+                  scales::comma( data$total[ pick_one.b ] ), ")" )
+seas_df.b = decompose.seas( df.b  , transform = "log" , title = df.name )
+
+df.log = log( df.b )
+df.seasonal = df / seasonal
+date = as.Date( as.yearmon(time( seas_df.b[[1]][[1]]$x ) ) ) 
+as.integer( df.seasonal )
+smooth_trend( )
+
+
+seas_output = tibble(
+    date =  date  ,
+    observed = as.integer( df ) , 
+    seasonal = seasonal , 
+    trend = as.integer( df/seasonal ) ,
+    remainder = NA
+    
+) %>%
+    gather( var, value, -date) %>%
+    mutate( 
+        var = factor( var, levels = c('observed', 'trend', 'seasonal', 'remainder') ) 
+    )
+
+g = ggplot( seas_output, aes( x =  date , y = value )) +
+    geom_line() +
+    facet_grid( var ~ . , scales = 'free' ) +
+    theme_bw() +
+    labs( title = df.name , 
+          subtitle = paste( "Coefficient of Variation:" , scales::percent(coe) ) ,
+          caption = paste( transform , ":" , seas_df$model$arima$model ) )
+g
 
 #### OUTLIERS #####
 library(tsoutliers)
@@ -172,13 +275,90 @@ all.dates.frame <- ts(  rep( NA, length( all.dates) ), all.dates )
 
 
 # Summary by level ####
-
+x.dec  %>% .$dec %>% hist(. , breaks = seq( 0 , max( ., na.rm = TRUE ) + .25 , .25 ) )
 x.dec %>% filter( quality %in% 'd' ) %>% .$dec %>% hist(. , breaks = seq( 0 , max( ., na.rm = TRUE ) + .25 , .25 ) )
 
-x.dec %>% group_by( level ) %>%
+x.dec %>% group_by( level , feature ) %>%
     summarise(
         wt.mean = weighted.mean( dec , total , na.rm = TRUE )
     )
+# map  ####
+library(sp)
+region.dec = x.dec %>% filter( level == 2 , feature %in% 'Polygon' ) 
+regions = admins[ match( region.dec$orgUnit, admins$id ), ]$polygons 
+map.region = SpatialPolygonsDataFrame( regions , region.dec, match.ID = FALSE )
+
+district.dec = x.dec %>% filter( level == 3 , feature %in% 'Polygon' ) 
+districts = admins[ match( district.dec$orgUnit, admins$id ), ]$polygons 
+map.district = SpatialPolygonsDataFrame( districts , district.dec, match.ID = FALSE )
+
+factpal <- colorFactor( 
+    c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00'), 
+    map.district$quality, reverse = TRUE )
+
+binpal <- colorBin( brewer.pal( 5, "Reds"), 
+                    domain = map.district$dec , bins =5, 
+                    na.color = "#bdbdbd", pretty = TRUE
+)
+
+# Find a center point for each region
+library(rgeos)
+centers.region <- data.frame(gCentroid(map.region, byid = TRUE))
+centers.region$name <- map.data$orgUnit.name
+centers.region$dec <- map.data$dec
+
+centers.district <- data.frame(gCentroid(map.district, byid = TRUE))
+centers.district$name <- map.district$orgUnit.name
+centers.district$dec <- map.district$dec
+
+
+
+library(leaflet)
+regionMap = leaflet(  ) %>%
+    
+    addTiles(  urlTemplate = 
+                   "http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+    )  %>% 
+    
+    addPolygons( data = map.region ,
+                 group = 'Region' ,
+                 color = "black",
+                 weight = 1 ,
+                 opacity = 1 ,
+                 # label = ~paste( scales::percent(dec) ),
+                 # labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE, textsize = "14px") ,
+                 popup = ~paste( orgUnit.name , percent( dec ) )  ,
+                 fillColor =  ~binpal(dec),
+                 fillOpacity = .5
+    ) %>%
+    addPolygons( data = map.district ,
+                 group = 'District' , 
+                 color = "black", 
+                 weight = 1 , 
+                 opacity = 1 ,
+                 # label = ~paste( scales::percent(dec) ),
+                 # labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE, textsize = "14px") ,
+                 popup = ~paste( orgUnit.name  , percent( dec ) )  ,
+                 fillColor =  ~binpal(dec),
+                 fillOpacity = .5
+    ) %>%
+    addLabelOnlyMarkers(data = centers.district,
+                        group = 'District' ,
+                        lng = ~x, lat = ~y, label = ~dec,
+                        labelOptions = labelOptions(noHide = F, textOnly = TRUE,
+                                                    textsize = "15px" )
+                        ) %>% 
+    addLegend(position = "bottomright", pal = binpal, values = map.district$dec,
+              title = "Error",
+              opacity = 1 ) %>%
+    # Layers control
+    addLayersControl(
+        overlayGroups = c("Region", "District"), 
+        # options = layersControlOptions(collapsed = FALSE),
+        position = "topright"
+    )  
+                 
+regionMap
 
 
 
@@ -237,8 +417,11 @@ lowest_level_ous_with_most_data = which( ous$level %in% l )
 an_ous =  ous.random(4) 
 
 # TIME-Series  ####
-an_ous 
-ts_ou_de = ts.ou.de( data = d , ous =  an_ous$id , de = de.id , start_year = NA )
+de.id = 'E4LZP3KUbOG' # MALAWI: NMCP OPD Confirmed Malaria Cases Through RDT
+
+low_dec
+ous_ids = x.dec$orgUnit[low_dec]
+ts_ou_de = ts.ou.de( data = d , ous =  ous_ids[1] , de = de.id , start_year = NA )
 ts_ou_de
 
 # Random Decompose Example ####
@@ -581,7 +764,7 @@ ggplot(
         
         
         
-        #  Summary ####
+#  Summary ####
 
 
 glimpse(CoeffVar)

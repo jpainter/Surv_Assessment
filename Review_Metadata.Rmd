@@ -280,35 +280,10 @@ There are `r  md$organisationUnits %>% nrow %>% comma()` organisation units in `
 ```{r ou_and_levels }
 
   # levels
-  levels = character()
-    
-  for ( i in seq_along( md$organisationUnitLevels$id) ){
-    
-        levels =  c(levels, paste0("LEVEL-", i) )
-      }
-      
-  levels = paste( levels, collapse = ";")
-  
-  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+  levels.vector = levels_from_metatdata( md )
 
   
-   ous =  md$organisationUnits %>% 
-        select( id, path, name, shortName, coordinates , 
-                created, lastUpdated , ends_with('Date') 
-                ) %>% as.tibble %>%
-       rename( orgUnit.name = name ) %>%
-       rowwise() %>%
-        mutate( 
-          level = map_int( path, 
-                               ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
-                               ) ,
-          parent.id =  map_chr( path, ~parse_parent_ous( .x ) ) ,
-          feature = map_chr( coordinates, ~feature_type(.x ) )
-        ) %>%
-       inner_join( md$organisationUnits %>% select( id, name ) ,
-                   by = c('parent.id' = 'id' ) ) %>%
-       ungroup() %>%
-       rename( parent_ou.name = name )
+   ous =  ous_from_metatdata( md )
    
 
   table_ou_levels =   count( ous, level ) %>%
