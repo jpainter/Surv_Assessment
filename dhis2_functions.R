@@ -604,7 +604,7 @@ ous.translated = function(  .meta = NULL,
  library(utils)
  
  retry <- function(expr, isError=function(x) "try-error" %in% class(x), 
-                   maxErrors=5, sleep=0) {
+                   maxErrors=3, sleep=1) {
      attempts = 0
      retval = try( eval(expr) )
      
@@ -749,14 +749,15 @@ ous.translated = function(  .meta = NULL,
          
          stopifnot( !is.null( dsde) )
          
+       
          # get datasets associated with data_totals dataElements
          dataElements =  data_totals %>% 
              # link datasets
-             inner_join( dsde , by = "dataElement" 
+             inner_join( dsde , by = c("dataElement" = "dataElement.id" ) 
              ) %>%
-             count( dataSet ) %>% 
+             count( dataSet , dataSet.id ) %>% 
              # convert ids to names
-             rename( id = dataSet ) %>%
+             rename( id = dataSet.id ) %>%
              left_join( md$dataSets %>% select( name, id ), 
                         by = "id" 
              ) %>%
@@ -783,6 +784,9 @@ ous.translated = function(  .meta = NULL,
                     length = length( periods ) )
      
      for ( period in seq_along( periods ) ){
+       
+         period_data_file = paste0(  file , "_", periods[period] ) 
+         if ( file.exists( period_data_file ) ) existing.data = read_rds( period_data_file ) %>% as.tibble()
 
          data.de = list()
          
@@ -798,12 +802,19 @@ ous.translated = function(  .meta = NULL,
              # if dataElement in same period already exists...
              if ( exists( "existing.data" ) ){
                  
-                 in.period =existing.data$period %in% periods[ period ] 
-                 in.element = existing.data$dataElement %in% dataElements$id[ element ] 
+                 in.period = existing.data$period %in% periods[ period ] 
+                 in.element = existing.data$dataElement %in% dataElements$dataElement.id[ element ] 
  
                  existing.value = existing.data[ in.period & in.element , ]
                  
                  if ( nrow( existing.value ) > 0  ){
+                   
+                   cat( paste( periods[ period ], "Element" , element ,
+                                 "/" , length( dataElements$dataElement.id ) ,
+                                 ":" , dataElements$dataElement[ element ] ,
+                                 " \n " ,
+                                 "Previously downloaded. \n")
+                   )
                      
                      # use previously downloaded data, then go to next
                      data.de[[ element ]] = existing.value
@@ -858,13 +869,18 @@ ous.translated = function(  .meta = NULL,
                  )
                  )
                  
+             } else {
+               
+               print( paste( periods[ period ], "Element" , element ,
+                             "/" , length( dataElements$dataElement.id ) ,
+                             ":" , dataElements$dataElement[ element ])
+               )
+               
+               
              }
  
                  
-            print( paste( periods[ period ], "Element" , element ,
-                               "/" , length( dataElements$dataElement.id ) ,
-                               ":" , dataElements$dataElement[ element ])
-                 )
+            
 
              
              data.level = list()
@@ -911,7 +927,7 @@ ous.translated = function(  .meta = NULL,
                  
                      } else {
                          
-                     # print( "no records" )
+                     cat( "no records \n" )
                  }
              }
              
@@ -929,6 +945,10 @@ ous.translated = function(  .meta = NULL,
          print( paste( "...Period" , periods[period]  , "has", 
                        scales::comma( nrow( data[[period]] ) ) , 
                        "records."  ) )
+         
+         write_rds( data[[ period ]] , 
+                    period_data_file 
+                    )
          
      }
      

@@ -59,7 +59,7 @@ ous.translated = function(  .meta = NULL,
     stopifnot( !is.null( .meta ) )
     
   
-     meta_cols = c( 'id', 'name', 'openingDate', 'closedDate', 'path', 'coordinates' )
+     meta_cols = c( 'id', 'name', 'openingDate', 'closedDate', 'path', 'coordinates' , 'children')
     
     .meta$organisationUnits[ , meta_cols]  %>% 
         
@@ -68,7 +68,8 @@ ous.translated = function(  .meta = NULL,
         filter( if ( open.only ){ is.na(closedDate) } else { TRUE }  ) %>%  
         
         mutate(
-            feature = map_chr( coordinates, ~feature_type(.x ) ) 
+            feature = map_chr( coordinates, ~feature_type(.x ) ) ,
+            children = map_dbl( children, ~length(.) )
         ) %>%
 
         rowwise() %>%

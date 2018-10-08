@@ -62,8 +62,9 @@ knitr::opts_chunk$set( echo = params$echo ,
                        )
 
 
+    data_directory = params$data_directory  # folder containing country data 
     dhis_instance = params$dhis_instance
-    data_directory = params$data_directory  # folder containing login_file 
+
     output_format = params$output_format
     
     # this folder will hold output of the metadata and data reviews
@@ -113,6 +114,12 @@ origin.login = function(){
     output.suffix = outputs %>% 
         filter( output_format == params$output_format ) %>% 
         .$output_suffix
+    
+    
+    dataset.directory = paste0( origin.folder , "datasets/" )
+    if (!dir.exists( dataset.directory ) ) dir.create(  dataset.directory )
+  
+
 ```
 
 ## **`r toupper( params$dhis_instance )` **
@@ -123,16 +130,11 @@ This script creates the review documents by first downloading and cleaning some 
 
 ```{r all_meta.  }
 
-  meta_data_file = paste0( origin.folder ,
-                           dhis_instance, 
-                           "_metadata.rds" ) 
+
+  meta_data_file = paste0( origin.folder , dhis_instance, "_metadata.rds" ) 
 
 
-  keep_the_existing_one = FALSE # so, dont download a new one.  
-
-  ## This variable overrides the global parameter,  create_new
-  
-  if ( (!file.exists( meta_data_file) | params$create_new ) & !keep_the_existing_one ) {
+  if ( (!file.exists( meta_data_file) | params$create_new ) ){
    
     # origin.login in to server
     origin.login()
@@ -319,13 +321,19 @@ admins = md$organisationUnits %>%
 
 admins = readRDS( admins_file )
 
-admins$polygons = rmapshaper::ms_simplify(admins$polygons  )  
+admins$polygons = rmapshaper::ms_simplify( admins$polygons ,
+                                           keep = .1 ,
+                                           drop_null_geometries = FALSE ,
+                                           keep_shapes = TRUE )  
 
 # if this step fails--because it results in too little detail, increase the paramater keep = .50 or higher.  default is 0.05 
 
 # NB: todo:  test the polygons to see if they have too much detail (Malawi), compared with countries with very little (Nigeria)
 
 # plot( admins$polygons )
+
+# TODO: Check that admin polygons are in the bounding box for the country
+# If not, try reversing lat/long or changing sign
 
 ```
 
@@ -694,7 +702,7 @@ if ( !exists( "facilities" ) ){
 
 ```
 
-## Metadata
+## Metadata summary
 
 ```{r Metadata_Review. }
     
@@ -886,17 +894,28 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
 ```{r dataElement_spreadsheet}
 
-
-    de.review.xlsx = paste0( output_directory , "/" ,
-                             dhis_instance , "/" ,
-                             dhis_instance , "_" , 
+    de.review.xlsx = paste0( origin.folder , 
                              "dataElements.xlsx" )
 
-
-  display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
+    # if file exists and want to re-write, rename
+    if ( file.exists( de.review.xlsx ) & params$create_new ){
+        
+        file.rename( de.review.xlsx , paste0( de.review.xlsx , 
+                                            format(Sys.time(),
+                                                   "%b%d%Y")
+        ))
+    
+    } 
+    
+   # if file does not exist, create
+    if ( !file.exists( de.review.xlsx ) ){
+      
+    # Create excel worksheet with separate tab for each search
+      
+      
+    display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
                                  'categoryCombo', 'id' )
 
-  # Create excel worksheet with separate tab for each search
 
     l = map( seq_along( searches ) ,
             
@@ -962,18 +981,9 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
     )
     
     names(l) = names.searches
-
- 
-    if ( file.exists( de.review.xlsx ) & params$create_new ){
-        
-        file.rename( de.review.xlsx , paste0( de.review.xlsx , 
-                                            format(Sys.time(),
-                                                   "%b%d%Y")
-        ))
-        
-        try( openxlsx::write.xlsx( l , de.review.xlsx ) )
     
-    } 
+    try( openxlsx::write.xlsx( l , de.review.xlsx ) )
+    }
     
 
 ```
@@ -996,13 +1006,7 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
 
 ```{r data_elements_include. }
-
-
-    de.review.xlsx = paste0( output_directory , "/" ,
-                             dhis_instance , "/" ,
-                             dhis_instance , "_" , 
-                             "dataElements.xlsx" ) 
-
+    
     sheets = excel_sheets( de.review.xlsx ) 
     
     use_these_sheets = sheets %in% c( "malaria_stock", "stock", "pop", "attendance", "opd" ,
@@ -1026,6 +1030,8 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
                             ) 
             
     }
+    
+   rmarkdown::paged_table( de.include )
 
 ```
 
@@ -1049,13 +1055,15 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 ## Request Data Totals 
 
 ```{r data_totals}
-  
-    data.totals.file = paste0( origin.folder , 
+
+    data.totals.file = paste0( dataset.directory ,
                      dhis_instance, 
-                     "_dataset_totals.rds" )
+                     "_totals.rds" )
 
     nde = nrow( de.include )
+    
 
+    # if doesn't exist or creating new, get dataset
     if ( nde > 0 & params$create_new | !file.exists( data.totals.file ) ){
     
         data_totals = api_data( 
@@ -1072,17 +1080,23 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
     
     } else {
         
+        # load previously downloaded dataset
         data_totals = readRDS( data.totals.file )
     }
     
+    # if new dataset, rename old one
     if ( file.exists( data.totals.file ) & params$create_new ){
+      
+      # Retrieve access data 
+      date_file = file.info( data.totals.file )$ctime 
         
         file.rename( data.totals.file ,
-                     paste( data.totals.file ,
-                            format( Sys.time(), "%b%d%Y" )
+                     paste0( data.totals.file , "." ,
+                            format( date_file , "%b%d%Y" )
                             )
                      )
     }
+    
     
     if ( !file.exists( data.totals.file) ) saveRDS( data_totals , data.totals.file )
         
@@ -1098,11 +1112,11 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 ```{r data_details}
 ## DataElements : details 
 
-    data.details.file = paste0( origin.folder , 
-                     dhis_instance, 
-                     "_dataset_details.rds" )
+    data.details.file = paste0( dataset.directory ,
+                                dhis_instance, 
+                                "_details.rds" )
 
-    nde = length( de.include )
+    nde = nrow( de.include )
 
     if ( nde > 0 & params$create_new | !file.exists( data.details.file )  ){
             
@@ -1123,10 +1137,13 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
     }
     
     if ( file.exists( data.details.file ) & params$create_new ){
+      
+        # Retrieve access data 
+        date_file = file.info( data.details.file )$ctime 
         
         file.rename( data.details.file ,
-                     paste( data.details.file ,
-                            format( Sys.time(), "%b%d%Y" )
+                     paste0( data.details.file , "." ,
+                            format( date_file , "%b%d%Y" )
                             )
                      )
     }
@@ -1144,13 +1161,13 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 ```
 
 
-## Request Data Completeness 
+## Request Data Completeness (form submissions) 
 
 
 ```{r download_dataset_submissions. }
 ## DataElements : details 
 
-  dataset.submission.file = paste0( origin.folder , 
+  dataset.submission.file = paste0( dataset.directory , 
                      dhis_instance ,  
                      "_dataset_submissions.rds" )
 
@@ -1189,6 +1206,7 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
 ```
 
+# Summarise data
 
 ```{r display_data.  }
 
@@ -1240,8 +1258,9 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
 ## Quantitative Quality
 
-```{r}
+```{r, updated_ous }
 source( "Trend code/Trend_Code.R")
+
 
 updated_facilities_file =  paste0( origin.folder , 
                             dhis_instance,
@@ -1284,14 +1303,19 @@ ous = ous.translated( .meta = md )
 
 ```{r translate_data_details}
 
-
+if ( !exists( "data_details" ) ) data_details = readRDS( paste0(
+  dataset.directory , dhis_instance , "_details.rds"
+) 
+)
+  
+  
 d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
     left_join( ous.updated %>% select( orgUnit , lat , long , impute ) , 
                by = 'orgUnit'
                )  %>%
     # combine data element with category option combo
-    unite( de.coc, dataElement, categoryOptionCombo ) %>%
-    unite( de.coc.name , dataElement.name , categoryOptionCombo.name ) 
+    unite( de.coc, dataElement, categoryOptionCombo, remove = FALSE ) %>%
+    unite( de.coc.name , dataElement.name , categoryOptionCombo.name , remove = FALSE ) 
 
 # glimpse(d)
 # count( d, level )
@@ -1303,7 +1327,7 @@ d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
 
 ```{r nest.dec }
 
-  nest.dec_file = paste0( origin.folder ,
+  nest.dec_file = paste0( dataset.directory ,
                            dhis_instance, 
                            "_nest.dec.rds" ) 
 
@@ -1313,11 +1337,15 @@ d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
           d.nest.dec = readRDS( nest.dec_file )
       }
 
-    if ( file.exists( meta_data_file) & params$create_new  ){ 
+    if ( file.exists( nest.dec_file) & params$create_new  ){ 
         
+      
+      # Retrieve access data 
+        file_date = file.info( nest.dec_file )$ctime 
+  
         file.rename( nest.dec_file ,
                      paste0( nest.dec_file , 
-                             format(Sys.time(), "%b%d%Y")
+                             format( file_date , "%b%d%Y")
                                                         )
                      )
     }
@@ -1328,9 +1356,17 @@ d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
     d.nest = d %>% 
         complete( nesting(orgUnit, de.coc.name, period) ) %>%
         mutate( value = as.integer( value ) ) %>%
-        group_by( level, level.name, feature, orgUnit ,  orgUnit.name , lat, long , 
-                  parent_ou.name ,  de.coc.name ) %>%
+        group_by( level, level.name, feature, children, orgUnit ,  orgUnit.name , lat, long , 
+                  parent_ou.name ,  de.coc.name,  
+                  dataElement, categoryOptionCombo,
+                  dataElement.name , categoryOptionCombo.name 
+                  
+                  ) %>%
         nest( period, value ) 
+    
+    saveRDS( d.nest , 
+             paste0( dataset.directory , dhis_instance , "_data_nest.rds") 
+    )
     
     # glimpse( d.nest )
     
