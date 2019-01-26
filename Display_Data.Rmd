@@ -21,7 +21,7 @@ editor_options:
   chunk_output_type: console
   
 params:
-  dhis_instance: Malawi
+  dhis_instance: Kenya
   create_new: FALSE 
   data_directory:  
   output_directory: ./ # bug: only uses current directory
@@ -542,6 +542,7 @@ Why are some totals > than sum of details/categories? (only evaluate if there is
 ## DataElements : details 
 
   dataset.submission.file = paste0( origin.folder , 
+                     "datasets/" ,
                      dhis_instance ,  
                      "_dataset_submissions.rds" )
 
@@ -630,15 +631,18 @@ This chart shows the percentage of active organisational units that were expecte
 ```{r expected_reports}
   # summary( s$completeness )
 
+# THIS CODE BLOCK IS HARD WIRED for KENYA.  
+# TODO make generic
 
-    s. = s %>% filter( level.name %in% 'Facility' , 
-                       dataSet %in% 'HMIS 15') %>%
-  mutate( dataSet = ifelse( dataSet %in% 'HMIS 15', "OPD FORM", NA )) %>%
+    s. = s %>% filter( level.name %in% 'Health Facility' 
+                       , grepl( "MOH 705 A" , dataSet )
+                       ) %>%
+  mutate( dataSet = ifelse( grepl( "MOH 705 A" , dataSet ) , "OPD FORM", NA )) %>%
   dplyr::select( -completeness, -n ) %>%
   spread( Category, report ) %>%
   mutate( completeness = ACTUAL_REPORTS / EXPECTED_REPORTS )
 
-    ggplot(s. ,  
+  ggplot(s. ,  
            aes(x = date, y = completeness, 
                    group = level.name , color = level.name )) +
     geom_line( size = 1.5 ) +
@@ -646,11 +650,12 @@ This chart shows the percentage of active organisational units that were expecte
                 labeller = label_wrap_gen( width = 25, multi_line = TRUE) ,
                 ncol = 4
                 ) +
-    labs( title = 'Completeness', 
-             subtitle =  'Reporting among OrgUnits Expected to Report' ,
+    labs( title = "Form Submission Rate" , 
+             # subtitle =  'among OrgUnits Expected to Report' ,
           # ,
           #    caption = params$dhis_instance ,
-          x = "Percent"
+          y = "" ,
+          x = ""
              ) +
     scale_y_continuous(labels = scales::percent, limits = c(0,1)) +
        theme_bw() +
@@ -660,6 +665,12 @@ This chart shows the percentage of active organisational units that were expecte
                  axis.text=element_text(size = 14, face = "bold") ,
             legend.position = 'none' )
   
+  
+  base_file =  paste0( dhis_instance , "/" , 
+                       dhis_instance , "_" ,
+                       unique(s.$dataSet)
+)
+  ggsave( paste0( base_file , "_submission_rate.png"), width=8,height = 5)
 ```
 
 
@@ -684,7 +695,7 @@ if ( s %>% filter( Category %in% "ACTUAL_REPORTS" ) %>% nrow > 0 ){
                 ncol = 4
                 ) +
         
-    labs( title = 'Percentage of Expected Recports Submitted', 
+    labs( title = 'Percentage of Expected Rports Submitted', 
              subtitle =  'denominator is current number of all org units' ,
              caption = params$dhis_instance
              ) +
@@ -745,7 +756,7 @@ if ( "level" %in% names( data_totals )  ){
         count( dataElement , level, level.name , period ) %>% 
         rename( reported = n ) %>%
         left_join( count( ous, level ) , by = 'level' ) %>%
-        mutate( expected = 908 ) %>%
+        # mutate( expected = 908 ) %>%
         mutate( 
             completeness = reported / expected 
             ) %>%

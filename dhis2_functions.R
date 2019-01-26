@@ -726,19 +726,20 @@ ous.translated = function(  .meta = NULL,
      if ( nrow( de.vars ) == 0 ){
          
          # if it exists, get list of data elements from totals file
-         if ( file.exists( file ) ){
+          totals_file = gsub( 'details' , 'totals' , file )
+         
+          if ( file.exists( totals_file ) ){
              
-             dataElements = readRDS( file ) %>% 
+             dataElements = readRDS( totals_file ) %>% 
                  count( dataElement ) %>%
                  inner_join( md$dataElements %>% select(id, name) ,
-                             by = c("dataElement" = "id") ) %>%
-                 .$name
+                             by = c("dataElement" = "id") ) 
 
             } else { return }
 
      } else {
          
-         dataElements = de.vars 
+         dataElements = de.vars
      }
      
      # dataElement.ids =  de.vars$dataElement.id
@@ -751,10 +752,8 @@ ous.translated = function(  .meta = NULL,
          
        
          # get datasets associated with data_totals dataElements
-         dataElements =  data_totals %>% 
-             # link datasets
-             inner_join( dsde , by = c("dataElement" = "dataElement.id" ) 
-             ) %>%
+         dataElements =  dsde  %>% 
+             filter( dataElement.id %in% de.vars$id ) %>%
              count( dataSet , dataSet.id ) %>% 
              # convert ids to names
              rename( id = dataSet.id ) %>%
@@ -786,6 +785,8 @@ ous.translated = function(  .meta = NULL,
      for ( period in seq_along( periods ) ){
        
          period_data_file = paste0(  file , "_", periods[period] ) 
+         
+         
          if ( file.exists( period_data_file ) ) existing.data = read_rds( period_data_file ) %>% as.tibble()
 
          data.de = list()
@@ -803,6 +804,7 @@ ous.translated = function(  .meta = NULL,
              if ( exists( "existing.data" ) ){
                  
                  in.period = existing.data$period %in% periods[ period ] 
+                 
                  in.element = existing.data$dataElement %in% dataElements$dataElement.id[ element ] 
  
                  existing.value = existing.data[ in.period & in.element , ]
@@ -825,7 +827,7 @@ ous.translated = function(  .meta = NULL,
              
              de.ids = dataElements$dataElement.id[ element ]
              
-             if ( submissions ){
+            if ( submissions ){
                  
                  reports = c( 'ACTUAL_REPORTS', 'ACTUAL_REPORTS_ON_TIME', 'EXPECTED_REPORTS' )
                  # get ids
@@ -918,7 +920,7 @@ ous.translated = function(  .meta = NULL,
                  if ( is.data.frame( fetch ) ){ 
                      
                      data.level[[ level ]] = fetch %>% 
-                         select( -storedBy, -created, -lastUpdated, -comment ) %>%
+                         # select( -storedBy, -created, -lastUpdated, -comment ) %>%
                          mutate( 
                              level = str_sub( level , -1 ) %>% as.integer() 
                          )
@@ -969,7 +971,188 @@ ous.translated = function(  .meta = NULL,
  }
  
  
- 
+ api_dataset = function( periods = NA , 
+                      levels = NA , 
+                      de.dataset = NA , # a data.frame like _key_data_elements.rds
+                      file = "" 
+ ){
+   
+   if ( is.null( file ) ){
+     
+     cat("Need to give name of file where data will be saved")
+     return()
+     
+   }
+   
+   
+   if ( file.exists( file ) ) existing.data = read_rds( file ) %>% as.tibble()
+   
+   
+   if ( all( is.na( periods )  ) ){
+     
+     periods = strsplit( date_code(), ";" , fixed = TRUE )[[1]]
+     
+   } 
+   
+    stopifnot( origin.login()  )
+   
+   print( baseurl )
+   
+   ##### cycle through each period, each data element...
+   
+   ndei = nrow( de.dataset ) * length( periods ) * length( levels )
+   pb <- progress_estimated( ndei )
+   
+   data = list()
+   
+   # TODO: initialize with expected size: e.g.
+   data  = vector(mode = "list", 
+                  length = length( periods ) )
+   
+   for ( period in seq_along( periods ) ){
+     
+     period_data_file = paste0(  file , "_", periods[period] ) 
+     
+     
+     if ( file.exists( period_data_file ) ) existing.data = read_rds( period_data_file ) %>% as_tibble()
+     
+     data.de = list()
+     
+     # todo: allocate size of list :
+     data.de = vector(mode = "list", 
+                      length = length( de.dataset$dataElement.id )
+     )
+     
+     for ( element in  seq_along( data.de ) ){
+       
+       update_progress(pb) 
+       
+       # if dataElement in same period already exists...
+       # if ( exists( "existing.data" ) ){
+       #   
+       #   in.period = existing.data$period %in% periods[ period ] 
+       #   
+       #   in.element = existing.data$dataElement %in% de.dataset$dataElement.id[ element ] 
+       #   
+       #   existing.value = existing.data[ in.period & in.element , ]
+       #   
+       #   if ( nrow( existing.value ) > 0  ){
+       #     
+       #     cat( paste( periods[ period ], "Element" , element ,
+       #                 "/" , length( de.dataset$dataElement.id ) ,
+       #                 ":" , de.dataset$dataElement[ element ] ,
+       #                 " \n " ,
+       #                 "Previously downloaded. \n")
+       #     )
+       #     
+       #     # use previously downloaded data, then go to next
+       #     data.de[[ element ]] = existing.value
+       #     next()
+       #   }
+       # }
+       # 
+         print( paste( periods[ period ], "Element" , element ,
+                       "/" , length( de.dataset$dataElement.id ) ,
+                       ":" , de.dataset$dataElement[ element ])
+         )
+     
+     reports = c( 'ACTUAL_REPORTS', 'ACTUAL_REPORTS_ON_TIME', 'EXPECTED_REPORTS' )
+     
+     # all permutations of dataset ids with report types
+
+     de.ids = outer( de.dataset$dataElement.id[ element ], 
+                     reports, 
+                     paste, sep=".")  %>%
+       as.character() 
+     
+     de.ids = de.ids[ order(de.ids) ] %>%
+       paste(. , collapse = ";")
+       
+    
+       data.level = list()
+       
+       for ( level in seq_along( levels ) ){
+         
+         # If no value for level 1, skip other levels
+         if ( level > 1 && !is.data.frame( fetch ) ) next()
+         
+         # print( paste( levels[level] , ifelse( details, "Details", "") ) )
+         
+         #Assemble the URL ( before starting, double check semicolons for dx dimension )
+         url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
+                        
+                        "&dimension=ou:", levels[level] , 
+                        
+                        "&dimension=pe:" , periods[period] ,
+                        
+                        "&dimension=dx:" , 
+                        
+                        # malaria
+                        de.ids ,
+                        
+                        "&displayProperty=NAME")
+         
+         # print( url )
+         
+         print( paste( "Level:", level , " ") )
+         
+         
+         # Fetch data
+         fetch <- retry( get(url, .print = FALSE )[[1]] ) # if time-out or other error, will retry 
+         
+         # if returns a data frame of values (e.g. not 'server error'), then keep
+         if ( is.data.frame( fetch ) ){ 
+           
+           data.level[[ level ]] = fetch %>% 
+             # select( -storedBy, -created, -lastUpdated, -comment ) %>%
+             mutate( 
+               level = str_sub( level , -1 ) %>% as.integer() 
+             )
+           
+           print( paste( nrow(fetch), "records." ) )
+           
+         } else {
+           
+           cat( "no records \n" )
+         }
+       }
+       
+       data.de[[ element ]] = data.table::rbindlist( data.level, fill = TRUE )
+       
+       # print( paste( dataElements[ element ]  , "has" , 
+       # scales::comma( nrow( data.de[[ element ]] ) ) , 
+       # "records"  ) ) 
+       
+   }
+   
+     # combine data
+     data[[ period ]] = data.table::rbindlist( data.de , fill = TRUE )
+     
+     print( paste( "...Period" , periods[period]  , "has", 
+                   scales::comma( nrow( data[[period]] ) ) , 
+                   "records."  ) )
+     
+     write_rds( data[[ period ]] , 
+                period_data_file 
+     )
+    
+   }
+   
+   # combine period data
+   d = data.table::rbindlist( data , fill = TRUE)
+   
+   print( paste( "TOTAL", 
+                 scales::comma( nrow( d ) ), 
+                 "records"  ) )
+   
+   if (!exists( "existing.data") )  existing.data = d[0, ]
+   
+   data = bind_rows( 
+     existing.data %>% filter( !is.na(value) )
+     , d )
+   
+   return( d )
+ }
  
  api_last12months_national_data = function( 
      periods = "LAST_YEAR" , 
@@ -1133,7 +1316,7 @@ ous.translated = function(  .meta = NULL,
  }
  
 
- # Determine which facilities reporting during previox xx intervals ####
+# Determine which facilities reporting during previox xx intervals ####
  
  continuous = function( data = submission , months = 24  
                         ){
@@ -1198,7 +1381,7 @@ ous.translated = function(  .meta = NULL,
      return(s)
  }
  
- # Datasets: html table of features
+# Datasets: html table of features
  dataset.ous.n = function( dataset, ous ){
      
      a = md$dataSets[ md$dataSets$name %in%  dataset  ,
@@ -1234,7 +1417,7 @@ ous.translated = function(  .meta = NULL,
      return(t)
  }
  
- # SKim Data
+# SKim Data
  
  skim_data = function( df = NULL ){
      

@@ -13,9 +13,9 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: kenya
-  data_directory:  
-  output_directory: ./ # bug: only uses current directory
+  dhis_instance: Burkina Faso
+  data_directory:  datasets
+  output_directory: 
   output_format: html_document
   display_reports: FALSE 
   create_new: FALSE 
@@ -23,6 +23,9 @@ params:
   echo: FALSE
 ---
 
+## **`r toupper( params$dhis_instance )` **
+
+This script creates the review documents by first downloading and cleaning some data from DHIS2.  Some of these steps require several minutes to an hour.  Those steps that require more than a few minutes are do
 
 ```{r package_list, message=FALSE, include= FALSE, warning= FALSE }
 
@@ -46,6 +49,10 @@ params:
     # install.packages("webshot")
     # webshot::install_phantomjs()
     
+# Clear memory
+  objs.not.params = ls()[ !grepl( "params" , ls() ) ]
+  rm(  list= objs.not.params )
+    
 # load accessory functions
 source('dhis2_functions.R')
 
@@ -53,7 +60,8 @@ source('dhis2_functions.R')
 
 
 ```{r knitr_setup, include = FALSE }
-knitr::opts_chunk$set( echo = params$echo ,
+
+  knitr::opts_chunk$set( echo = params$echo ,
                        comment = "" ,
                        warning = FALSE, 
                        cache = params$cache , 
@@ -62,22 +70,65 @@ knitr::opts_chunk$set( echo = params$echo ,
                        )
 
 
-    data_directory = params$data_directory  # folder containing country data 
+    # Country/Instance folder
     dhis_instance = params$dhis_instance
-
-    output_format = params$output_format
     
-    # this folder will hold output of the metadata and data reviews
-    output_directory =  getwd() # "." is the directory where this file sits. 
-    
-    origin.folder = paste0( ifelse( is.na( data_directory ), "" , 
-                                  paste0( dhis_instance, "/" ) 
-                                  ) ,
-                          dhis_instance , "/")
-    
+    origin.folder = paste0( dhis_instance , "/")
+     
     if (!dir.exists( origin.folder ) ) dir.create( origin.folder )
     
+    
+    # sub-folder for data
+    dataset.directory = paste0( origin.folder , params$data_directory , "/" )
+    
+    if (!dir.exists( dataset.directory ) ) dir.create(  dataset.directory )
   
+    
+    # Type of output:  html, pdf, doc..
+    output_format = params$output_format
+    
+    
+    # this folder will hold output of the metadata and data reviews
+    output.directory =  ifelse( is.null( params$output_directory ) , 
+                                origin.folder , # the directory where this file sits. 
+                                paste0(  params$output_directory , "/" , origin.folder )
+    )
+    
+   
+    
+    
+    outputs = tibble( 
+        output_format = c(  "html_document", 'word_document'),
+        output_suffix = c(  "html", 'doc' )
+    )
+    
+    output.suffix = outputs %>% 
+        filter( output_format == params$output_format ) %>% 
+        .$output_suffix
+    
+    
+ 
+
+   
+    # list for passing to parameters to sub-documents
+    params.list = list(
+        dhis_instance = params$dhis_instance , # selects dhis2 instance
+        data_directory = params$data_directory ,  # root data directory
+        output_directory = params$output_directory ,
+        output_format = params$output_format ,
+        cache = FALSE ,
+        echo = FALSE 
+    )
+
+    
+  
+
+    
+```
+
+
+```{r login }
+
  # login shortcuts
 
 origin.login = function(){
@@ -93,49 +144,22 @@ origin.login = function(){
 # test login 
  assert_that( origin.login() )
   
-    
 ```
 
 
-```{r parameters2 }
-    params.list = list(
-        dhis_instance = dhis_instance , # selects dhis2 instance
-        data_directory = data_directory ,  # root data directory
-        output_directory = output_directory ,
-        cache = FALSE ,
-        echo = FALSE 
-    )
-
-    outputs = data_frame( 
-        output_format = c(  "html_document", 'word_document'),
-        output_suffix = c(  "html", 'doc')
-    )
-    
-    output.suffix = outputs %>% 
-        filter( output_format == params$output_format ) %>% 
-        .$output_suffix
-    
-    
-    dataset.directory = paste0( origin.folder , "datasets/" )
-    if (!dir.exists( dataset.directory ) ) dir.create(  dataset.directory )
-  
-
-```
-
-## **`r toupper( params$dhis_instance )` **
-
-This script creates the review documents by first downloading and cleaning some data from DHIS2.  Some of these steps require several minutes to an hour.  Those steps that require more than a few minutes are do
 ## Fetch Required Data 
+
 ### 1. Download DHIS2 Metadata (~5-10 min)
 
 ```{r all_meta.  }
 
 
-  meta_data_file = paste0( origin.folder , dhis_instance, "_metadata.rds" ) 
+  meta_data_file = paste0( dataset.directory , dhis_instance, "_metadata.rds" ) 
 
 
-  if ( (!file.exists( meta_data_file) | params$create_new ) ){
+  if ( ( !file.exists( meta_data_file) ) ){
    
+    
     # origin.login in to server
     origin.login()
 
@@ -212,7 +236,7 @@ This script creates the review documents by first downloading and cleaning some 
   }
   
   # Get installed apps
-  apps_data_file = paste0( origin.folder ,
+  apps_data_file = paste0( dataset.directory ,
                            dhis_instance, 
                            "_apps.rds" ) 
   
@@ -245,14 +269,14 @@ This script creates the review documents by first downloading and cleaning some 
 # if no closdeDate, then set to NA
 if ( ! 'closedDate' %in% names( md$organisationUnits ) ){
     
-    md$organisationUnits$closedDate 
+    md$organisationUnits$closedDate = NA
 }
 
 # orgUnits that are polygons (likely admin), and open
 
 admins = md$organisationUnits %>% 
     select( id, name, coordinates, openingDate, closedDate, path  ) %>%
-    as.tibble %>% 
+    as_tibble %>% 
     mutate( 
         feature_type = map_chr( coordinates, ~feature_type(.x) ) 
         ) %>%
@@ -264,7 +288,7 @@ admins = md$organisationUnits %>%
                          ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
             ) ,
         
-        Year = year( ymd_hms( openingDate ) )  %>% ifelse( .<2014, 2014, .) ,
+        Year = year( ymd_hms( openingDate ) )  %>% ifelse( .<2008 , 2014 , . ) ,
         
         coordinates = fix_coordinate_brackets( coordinates ) ,
         
@@ -274,7 +298,7 @@ admins = md$organisationUnits %>%
             )
         
     ) %>%
-    as.tibble()
+    as_tibble()
 
 
     char_js. = map( admins$str_js, ~ FROM_GeoJson( .x ) ) 
@@ -303,7 +327,8 @@ admins = md$organisationUnits %>%
 # NB TODO: Give message for coordinates missing lat long
     
  # save 
- admins_file =  paste0( origin.folder , dhis_instance, "_admin_boundaries.rds" ) 
+ admins_file =  paste0( dataset.directory , dhis_instance, "_admin_boundaries.rds" ) 
+ 
  if ( file.exists( admins_file ) & params$create_new ) file.rename( admins_file , 
                                                                      paste0( admins_file , 
                                                               format(Sys.time(), "%b%d%Y")
@@ -343,7 +368,7 @@ admins$polygons = rmapshaper::ms_simplify( admins$polygons ,
 # orgUnits that are points (likely HF), and open
 clinics = md$organisationUnits %>% 
     select( id, name, coordinates, openingDate, closedDate, path  ) %>%
-    as.tibble %>% 
+    as_tibble %>% 
     mutate( 
         feature_type = map_chr( coordinates, ~feature_type(.x) ) ,
         # remove quotation marks
@@ -363,7 +388,7 @@ clinics = md$organisationUnits %>%
 
 
  # save 
- facilities_file =  paste0( origin.folder , dhis_instance, "_facilities.rds" ) 
+ facilities_file =  paste0( dataset.directory , dhis_instance, "_facilities.rds" ) 
  
  if ( file.exists( facilities_file ) & params$create_new ){
      
@@ -387,7 +412,7 @@ Step: find orgUnit with polygon data that it belongs to. Separate path and trans
 
 ```{r clinics2.}
 
- if ( !exists( "clinics" ) | params$create_new ) clinics = readRDS( clinics_file )
+ # if ( !exists( "clinics" ) | params$create_new ) clinics = readRDS( clinics_file )
 
 # Long form or clinics dataframe with row for each clinic-parent
 clinics. = clinics %>%
@@ -400,15 +425,26 @@ clinics. = clinics %>%
         parent.level = row_number() - 1
     ) %>% 
     ungroup() %>% 
+  
+    filter( parent.level == level - 1 ) %>%
     
     # join with admins
     left_join( admins %>% 
                     select( id, name ) %>% 
+                    rename( admin.name = name, admin.id = id ) , 
+                by = c( 'parent.id' = 'admin.id' ) 
+                ) %>%
+  
+    # join with clinics
+    left_join( clinics %>% 
+                    select( id, name ) %>% 
                     rename( parent.name = name) , 
                 by = c( 'parent.id' = 'id' ) 
-                ) %>%
-    
-    filter( !is.na( parent.name ) )
+                ) 
+
+# %>%
+#     
+#     filter( !is.na( admin.name ) )
 
 # clinics.$polygon = admins$polygons[ match( clinics.$parent.id , admins$id )]
 
@@ -419,6 +455,8 @@ clinics. = clinics %>%
 
 - Check if facility with coordinates is in parent 
 
+TODO:  This only works for level one below the admin units.  Does not work for CHW assigned to facilities.  Update code to check if CHW are in the admin area of the facility they are associated with.  
+
 ```{r facilityInParent. }
 
  # c is data.frame of clinics with coordinates
@@ -426,7 +464,7 @@ clinics. = clinics %>%
  # c., farther below, is c updated from c.fix and c.impute
 
 
- updated_facilities_file =  paste0( origin.folder , 
+ updated_facilities_file =  paste0( dataset.directory , 
                             dhis_instance,
                             "_updated_facilities.rds" 
                             ) 
@@ -441,7 +479,7 @@ keep_the_existing_one = FALSE # so, dont download a new one.
      c = readRDS( updated_facilities_file ) 
      
      # trim some unwanted cols
-     if ( ncol( c ) > 16 ) c = c %>% select( 1:16 )
+     if ( ncol( c ) > 17 )  c = c %>% select( 1:17 )
          
  } else {
      
@@ -575,6 +613,51 @@ if ( !exists( "facilities" ) ){
  
 ```
 
+## Metadata summary (need to update)
+
+```{r Metadata_Review., eval = FALSE }
+    
+  output.filename = paste0( output.directory,
+                             dhis_instance, "_Metadata." ,
+                             output.suffix
+                             ) 
+
+    # rename if exists
+    if ( file.exists( output.filename ) & params$create_new ){
+        
+            file.rename( output.filename , 
+                    paste0( output.filename , 
+                            paste0( "." ,
+                            format( Sys.time(), "%b%d%Y" )
+                            )
+                            )
+                    )
+   }
+
+    # create new
+    if ( !file.exists( output.filename )  ) { 
+
+        rmarkdown::render( 'Display_Metadata.Rmd' ,
+                           
+           output_file = output.filename ,
+           output_format = output_format ,
+           # 'knitrBootstrap::bootstrap_document' ,
+           params = params.list ,
+           envir = new.env() ,
+           encoding = "UTF-8"
+           )
+         
+    }
+
+   if ( file.exists( output.filename ) & params$display_reports ){ 
+       
+       browseURL( output.filename ) 
+   }
+
+```
+
+## Data elements 
+
 
 ### 3. Query DHIS2 to determine frequency that selected data elements were submitted (~10-90 min)
 
@@ -646,6 +729,8 @@ if ( !exists( "facilities" ) ){
     
 ```
 
+### Request number of reports during last 12 months for each **data element**
+
 ```{r dataElementReporting }
 
   all.de = Reduce(  "|" , map( searches, eval_tidy  ) )
@@ -656,7 +741,7 @@ if ( !exists( "facilities" ) ){
      
   de.mal = de[  eval_tidy( malaria_items) , display.vars ]
 
-  reported_data_file = paste0( origin.folder ,
+  reported_data_file = paste0( dataset.directory ,
                            dhis_instance, 
                            "_reported.rds" ) 
   
@@ -679,7 +764,7 @@ if ( !exists( "facilities" ) ){
   
   new.dataElements =  setdiff( de.mal$id[ order( de.mal$id )] ,  d.reported.dataElements )
 
-  nde = length( new.dataElements)
+  nde = length( new.dataElements )
   
   # Get number reported for all elements
   if ( nde > 0 ){
@@ -697,58 +782,16 @@ if ( !exists( "facilities" ) ){
         
   } 
 
-
- 
-
-```
-
-## Metadata summary
-
-```{r Metadata_Review. }
-    
-  output.filename = paste0( output_directory, "/" ,
-                              dhis_instance, "/", 
-                             dhis_instance, "_Metadata." ,
-                             output.suffix
-                             ) 
-
-    # rename if exists
-    if ( file.exists( output.filename ) & params$create_new ){
-        
-            file.rename( output.filename , 
-                    paste0( output.filename , 
-                            paste0( "." ,
-                            format( Sys.time(), "%b%d%Y" )
-                            )
-                            )
-                    )
-   }
-
-    # create new
-    if ( !file.exists( output.filename )  ) { 
-
-        rmarkdown::render( 'Display_Metadata.Rmd' ,
-                           
-           output_file = output.filename ,
-           output_format = output_format ,
-           # 'knitrBootstrap::bootstrap_document' ,
-           params = params.list ,
-           envir = new.env() ,
-           encoding = "UTF-8"
-           )
-         
-    }
-
-   if ( file.exists( output.filename ) & params$display_reports ){ 
-       
-       browseURL( output.filename ) 
-   }
+  
 
 ```
 
 
-## Select data elements to review
+### Request Data Completeness (form submissions) : number of  **data form** reported during last 12 months ('DHIS2 reporting')
 
+
+
+- Create table, 'dsde',  to lookup form associated with eath data element 
 
 ```{r dsde. }
 
@@ -767,7 +810,7 @@ if ( !exists( "facilities" ) ){
 
 # For versions <2.6, need to add categoryCombo
     if ( !'categoryCombo' %in% names(dsde) ){
-      categoryCombos =  data_frame(
+      categoryCombos =  tibble(
           dataSet = md$dataSets$id ,
           categoryCombo = md$dataSets$categoryCombo$id )
       
@@ -777,266 +820,7 @@ if ( !exists( "facilities" ) ){
 ```
 
 
-```{r d.mal.reported. }
-
-open_ou =     md$organisationUnits %>% 
-    select( id, closedDate) %>%
-    filter( is.na(closedDate) ) %>%
-    select( id )
-
-n_facilities_assigned_to_datasets = md$dataSets %>%
-    select( id, organisationUnits) %>%
-    rename( dataSet.id = id ) %>% 
-    unnest( organisationUnits ) %>%
-    inner_join( open_ou , by = 'id' ) %>%
-    count( dataSet.id ) %>%
-    rename( n_facilities = n )
-    
-# number of options in each catgory combo
-
-options = md$categoryCombos %>% 
-    select( id, categories) %>% 
-    unnest( categories ) %>%
-    rename( categoryCombo = id , category = id1 ) %>%
-    inner_join( md$categories  %>% select( id, categoryOptions ), 
-                by = c('category' = 'id' )
-                ) %>%
-    unnest( categoryOptions ) %>% 
-    count( categoryCombo ) %>%
-    rename( n_options = n )
-
-
-# Select all malaria relevent variables
-malaria.groups = setdiff( names(searches) , c("TB", "imm", "HIV", "opd", "idp") )
-                            
-  all.possible.malaria.de = Reduce(  "|" , map( searches[ malaria.groups ], eval_tidy  ) )
-  # sum( all.possible.malaria.de )
-  
-de.selected = de[ all.possible.malaria.de , display.vars ] 
-
-
-d.mal.reported = d.reported[ , c("dataElement", "value")] %>% 
-    
-    rename( dataElement.id = dataElement ) %>%
-    
-    inner_join(
-
-        count(dsde, dataElement.id, categoryCombo) %>% select(-n),
-
-        by = c("dataElement.id")
-
-        ) %>%
-    
-    left_join(
-        
-        options ,
-        
-        by = 'categoryCombo'
-        
-        ) %>%
-    
-   left_join( 
-       
-       dsde  , 
-       
-       by = 'dataElement.id' 
-       
-       ) %>%
-    
-   left_join( 
-       
-       md$dataSets %>% select( id, name, periodType, timelyDays ) %>%
-           rename( dataSet = name ),
-       
-       by = c( 'dataSet.id' = 'id' )
-       
-       ) %>%
-    
-    left_join( 
-        
-        n_facilities_assigned_to_datasets , by = 'dataSet.id'
-        
-        ) %>%
-
-    mutate( 
-        
-        val = as.integer(value) 
-
-        , frequency = case_when(
-            periodType %in% "Weekly" ~ 52 ,
-            periodType %in% "Monthly" ~ 12 ,
-            periodType  %in% "Quarterly" ~ 4 ,
-            periodType  %in% "Yearly" ~ 1 ,
-            TRUE ~ 1
-        )
-            
-        , pVal = val / (frequency * n_facilities * n_options ) 
-
-            
-        ) %>% 
-    
-    mutate( 
-                Percent_Reported = sprintf("%1.2f%%", 100 * pVal ) 
-                ) 
-
-
-
-# If a data element linked to >1 dataSet, select the one with greatest number of facilities
-    d.mal.reported = d.mal.reported %>%
-        group_by( dataElement.id , dataElement ) %>%
-        arrange( -n_facilities  ) %>%
-        filter(  row_number() == 1 ) %>%
-        arrange( desc(pVal) ) 
-
-   datatable( d.mal.reported , filter = "top")
-```
-
-
-```{r dataElement_spreadsheet}
-
-    de.review.xlsx = paste0( origin.folder , 
-                             "dataElements.xlsx" )
-
-    # if file exists and want to re-write, rename
-    if ( file.exists( de.review.xlsx ) & params$create_new ){
-        
-        file.rename( de.review.xlsx , paste0( de.review.xlsx , 
-                                            format(Sys.time(),
-                                                   "%b%d%Y")
-        ))
-    
-    } 
-    
-   # if file does not exist, create
-    if ( !file.exists( de.review.xlsx ) ){
-      
-    # Create excel worksheet with separate tab for each search
-      
-      
-    display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
-                                 'categoryCombo', 'id' )
-
-
-    l = map( seq_along( searches ) ,
-            
-            ~ de[ eval_tidy( searches[[.x]] )  , display.vars ] %>%
-            rename( categoryCombo.id = categoryCombo ) %>%
-            mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
-            
-            # categoryCombos
-            left_join(  
-                select( md$categoryCombos, id, name, categories ) %>%
-                            rename(categoryCombo.id = id,
-                                   categoryCombo = name ,
-                                   category.id = categories
-                            ) , 
-                        by = 'categoryCombo.id'
-                        ) %>%
-        
-            # dataElementGroups
-            left_join( 
-                md$dataElementGroups %>% 
-                    select( name, dataElements) %>%
-                    unnest %>% 
-                    group_by( id ) %>%
-                    summarise( 
-                        Group = paste( name, collapse = " / ")
-                        ) ,
-                by = 'id'
-                ) %>%  
-                  
-            # dataSets              
-            left_join(
-                dsde %>% select( dataElement.id, dataElement, dataSet )  %>%
-                    group_by( dataElement.id , dataElement ) %>%
-                    summarise( 
-                        n_dataSets = n_distinct( dataSet ) ,
-                        dataSets = paste( dataSet, collapse = "; ")
-                        )  , 
-                by = c('id' = 'dataElement.id')
-                ) %>%
-         
-        # number reported       
-        left_join( d.mal.reported %>%
-                       group_by( dataElement.id ) %>%
-                       summarise( 
-                           value = sum( val, na.rm = TRUE ) , 
-                           pVal = max( pVal, na.rm = TRUE )) , 
-                   by = c( "id" = "dataElement.id" )   
-                   
-                   ) %>%
-
-        mutate(  
-            
-            Include = ifelse( pVal>.25, "Y" ,  NA ) ,
-            Reports_Last_Year = as.integer( value )
-            
-            ) %>%
-            
-        select( id, Include, pVal, Reports_Last_Year ,name , dataSets, Group , categoryCombo ) %>%
-        rename( dataElement.id = id, dataElement = name ) %>% 
-        arrange( -pVal,  dataElement )
-            
-
-    )
-    
-    names(l) = names.searches
-    
-    try( openxlsx::write.xlsx( l , de.review.xlsx ) )
-    }
-    
-
-```
-
-```{r dataElement_Selection. }
-
-  
-    # if exist, open excel file
-    if ( file.exists( de.review.xlsx ) & params$display_reports == TRUE ){
-        
-        browseURL( de.review.xlsx )
-        
-    }  
-    
-    
-```
-
-## Data
-
-
-
-```{r data_elements_include. }
-    
-    sheets = excel_sheets( de.review.xlsx ) 
-    
-    use_these_sheets = sheets %in% c( "malaria_stock", "stock", "pop", "attendance", "opd" ,
-                                      "ipd" , "malaria_items")
-    
-    target_sheets = sheets[ use_these_sheets ]  
-    
-    # get selected rows from every spreadsheet tab
-    de.include = map_df(  seq_along( target_sheets ) , 
-                         ~readxl::read_xlsx( de.review.xlsx ,  sheet = target_sheets[.x] ) %>% 
-                             filter( !is.na(Include) ) ) %>%
-        
-        distinct( dataElement.id, .keep_all = TRUE )
-
-    # if none selected, pick intersection of malaria and confirmed 
-    if ( nrow( de.include) == 0 ){
-        
-        de.include = read_rds( paste0( origin.folder ,
-                               dhis_instance, 
-                               "_key_data_elements.rds" ) 
-                            ) 
-            
-    }
-    
-   rmarkdown::paged_table( de.include )
-
-```
-
-
-```{r}
+```{r levels.}
   # levels
   levels = character()
     
@@ -1052,6 +836,572 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 ```
 
 
+```{r download_dataset_submissions.  }
+## DataElements : details 
+
+  dataset.reporting.file = paste0( dataset.directory , 
+                     dhis_instance ,  
+                     "_dataset_reporting.rds" )
+
+    if ( !file.exists( dataset.reporting.file ) | params$create_new ){
+      
+    # get datasets associated with data_totals dataElements
+    datasets =  dsde  %>% 
+       filter( dataElement.id %in% de[ all.de , ]$id ) %>%
+       count( dataSet , dataSet.id ) %>% 
+       # convert ids to names
+       rename( id = dataSet.id ) %>%
+       left_join( md$dataSets %>% select( name, id ), 
+                  by = "id" 
+       ) %>%
+       
+       # pretend datasets are dataelements
+       rename( dataElement.id = id ,  
+               dataElement = name
+       ) 
+
+            
+        dataset_reporting = api_dataset( 
+                                levels = levels.vector[1] , 
+                                
+                                de.dataset =   datasets , 
+                    
+                                file = dataset.reporting.file 
+                                
+                                )
+        
+     } else {
+        
+        dataset_reporting = readRDS( dataset.reporting.file ) 
+        
+    }         
+          
+    
+   # Rename existing file
+   if ( file.exists( dataset.reporting.file ) & params$create_new ){
+        
+        file.rename( dataset.reporting.file ,
+                     paste( dataset.reporting.file ,
+                            format( Sys.time(), "%b%d%Y" )
+                            )
+                     )
+    }
+    
+    # save new
+    if ( !file.exists( dataset.reporting.file) ) saveRDS( dataset_reporting , dataset.reporting.file )
+
+    # get date
+    dataset_reporting_date = file.info( dataset.reporting.file )$mtime
+
+```
+
+### Number facilities reporting last year.  
+
+```{r facilities_reporting_last_year, eval = FALSE }
+
+open_ou =     md$organisationUnits %>% 
+    select( id, closedDate) %>%
+    filter( is.na(closedDate) ) %>%
+    select( id )
+
+n_facilities_assigned_to_datasets = md$dataSets %>%
+    select( id, organisationUnits) %>%
+    rename( dataSet.id = id ) %>% 
+    unnest( organisationUnits ) %>%
+    # left_join( open_ou , by = 'id' ) %>%
+    count( dataSet.id ) %>%
+    rename( n_facilities = n )
+    
+# 1-year period to use for summary
+summary_year = min( d.reported$period )
+
+# mean percent of facilities submitting dataset-report
+
+ percent_dataset_reporting_last_year =  dataset_reporting %>% 
+    separate( dataElement, 
+              into = c( 'dataSet', 'reporting' ) , 
+              sep = "\\."  ) %>%
+    filter(  substr( period , 1, 4 ) %in%  summary_year ,
+             level == 1 )  %>%
+     mutate( value = as.integer(value)) %>%
+     spread( reporting, value ) %>%
+     group_by( dataSet ) %>%
+     summarise( 
+         forms_submitted_lastyear = sum( ACTUAL_REPORTS , 
+                                     na.rm = TRUE) , 
+         forms_expected_lastyear = sum( EXPECTED_REPORTS , 
+                                    na.rm = TRUE ) ,
+         forms_ontime_lastyear = sum( ACTUAL_REPORTS_ON_TIME , 
+                                  na.rm = TRUE ) ,
+         form_submission_rate = forms_submitted_lastyear /
+           forms_expected_lastyear
+         ) 
+ 
+
+```
+
+```{r d.mal.reported. }
+
+# number of options in each category combo
+
+options = md$categoryCombos %>% 
+    select( id, categories) %>% 
+    unnest( categories ) %>%
+    rename( categoryCombo = id , category = id1 ) %>%
+    inner_join( md$categories  %>% select( id, categoryOptions ), 
+                by = c('category' = 'id' )
+                ) %>%
+    unnest( categoryOptions ) %>% 
+    count( categoryCombo ) %>%
+    rename( n_options = n )
+
+# Category Option Combos
+ categoryOptions = 
+  
+  md$categoryOptionCombos %>% 
+  select( id, name ) %>% 
+  rename( 
+    categoryOptionCombo = name , 
+    categoryOptionCombo.id = id ) %>%
+  mutate( categoryCombo.id = 
+            md$categoryOptionCombos$categoryCombo$id ) %>%
+  inner_join( md$categoryCombos %>% select( id, name ) %>% 
+                rename( categoryCombo = name ),
+              by = c( 'categoryCombo.id' = 'id' ) )%>% 
+  group_by( categoryCombo.id, categoryCombo ) %>%
+  summarise( 
+    n_categoryOptions = n() , 
+    categories = paste( categoryOptionCombo , collapse = '; '  )
+  )
+ 
+ # compare options with categoryOptionCombos
+# glimpse( options )
+# glimpse( categoryOptions )
+# left_join( options, categoryOptions , by=c('categoryCombo'='categoryCombo.id') ) %>% View
+
+# Select all malaria relevent variables
+malaria.groups = setdiff( names(searches) , c("TB", "imm", "HIV", "opd", "idp", "susp", "conf", "stock", "deaths") )
+                            
+ all.possible.malaria = Reduce(  "|" , map( searches[ malaria.groups ], eval_tidy  ) )
+  # sum( all.possible.malaria.de )
+  
+de.all.possible.malaria = de[ all.possible.malaria , display.vars ] 
+
+# View( de.selected )
+
+d.mal.reported = d.reported[ , c("dataElement", "value")] %>% 
+    
+    rename( dataElement.id = dataElement ) %>%
+    
+    inner_join(
+
+        count( dsde, dataElement.id, categoryCombo) %>% select(-n) ,
+
+        by = c("dataElement.id")
+
+        ) %>%
+    
+    left_join(
+        
+        categoryOptions ,
+        
+        by = c( 'categoryCombo' = 'categoryCombo.id' )
+        
+        ) %>% 
+    
+   left_join( 
+       
+       dsde  %>% select( -categoryCombo ), 
+       
+       by = 'dataElement.id' 
+       
+       ) %>%  
+  
+   left_join( md$dataElements %>% 
+                select( id, zeroIsSignificant ) %>%
+                rename( dataElement.id = id ),
+              by = 'dataElement.id' ) %>%
+    
+   left_join( 
+       
+       md$dataSets %>% select( id, periodType, timelyDays
+                               , organisationUnits
+                               ) %>%
+           bind_cols( dataEntryForm.id = md$dataSets$dataEntryForm$id  ) ,
+       
+       by = c( 'dataSet.id' = 'id' )
+       
+       ) %>% 
+    
+    left_join( md$dataEntryForms %>% select( id, name ) %>%
+                   rename( dataEntryForm = name , dataEntryForm.id = id  ),
+               
+               by = 'dataEntryForm.id'  ) %>% 
+    
+    left_join( 
+        
+        n_facilities_assigned_to_datasets , by = 'dataSet.id'
+        
+        ) %>% 
+    
+    mutate( 
+        
+        val = ifelse( is.na( value ) , NA, as.integer( value ) )
+
+        , frequency = case_when(
+            periodType %in% "Weekly" ~ 52 ,
+            periodType %in% "Monthly" ~ 12 ,
+            periodType  %in% "Quarterly" ~ 4 ,
+            periodType  %in% "Yearly" ~ 1 ,
+            TRUE ~ 1
+        )
+        
+        
+        , expected = frequency * n_facilities * n_categoryOptions
+            
+        , pVal = ifelse( !is.na(expected) , val / expected , NA)
+
+            
+        ) %>% 
+    
+    mutate( 
+                Percent_Reported = sprintf("%1.2f%%", 100 * pVal ) 
+                )  
+
+# If a data element linked to >1 dataSet, select the one with greatest number of facilities
+    d.mal.reported.top.dataset = d.mal.reported %>%
+        group_by( dataElement.id , dataElement ) %>%
+        arrange( -n_facilities  ) %>%
+        filter(  row_number() == 1 ) %>%
+        arrange( desc(pVal) ) 
+
+# Warning: data too big for datatable
+#   It seems your data is too big for client-side DataTables. You may consider server-side processing: https://rstudio.github.io/DT/server.html
+    
+   datatable( d.mal.reported.top.dataset , filter = "top")
+```
+
+
+### Create spreadsheet with data elements that can be used to select key variables 
+
+```{r dataElement_spreadsheet}
+
+     de.review.xlsx = paste0( dataset.directory , 
+                             dhis_instance , 
+                             "_dataElements.xlsx" )
+
+    # previous.include -- if some data already downloaded 
+        downloaded = NA 
+                    
+        data.totals.file = paste0( dataset.directory ,
+                           dhis_instance, 
+                           "_totals.rds" )
+
+        if ( file.exists( data.totals.file ) ){
+            
+            data_totals = readRDS( data.totals.file ) 
+            
+            downloaded = count( data_totals, dataElement ) %>%
+                pull( dataElement )
+        }
+
+    # if file exists and want to re-write, rename
+    if ( file.exists( de.review.xlsx ) & params$create_new ){
+        
+        
+        # rename file
+        file.rename( de.review.xlsx , paste0( de.review.xlsx , 
+                                            format(Sys.time(),
+                                                   "%b%d%Y")
+        ))
+      
+    } 
+    
+   # if file does not exist, create
+    if ( !file.exists( de.review.xlsx ) ){
+      
+    # Create excel worksheet with separate tab for each search
+      
+      
+    display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
+                                 'categoryCombo', 'id' )
+
+
+    data_element_info = map( seq_along( searches ) ,
+            
+            ~ de[ eval_tidy( searches[[.x]] )  , display.vars ] %>%
+                
+            rename( categoryCombo.id = categoryCombo , 
+                    dataElement.id = id,
+                    dataElement = name ) %>%
+                
+            mutate( lastUpdated = format( ymd_hms( lastUpdated ), '%b %Y' ) ) %>%
+            
+            # categoryCombos
+            left_join(  
+                categoryOptions , 
+                        by = 'categoryCombo.id'
+                        )  %>%  
+                
+            # dataElementGroups
+            left_join( 
+                md$dataElementGroups %>% 
+                    select( name, dataElements) %>%
+                    unnest %>% 
+                    rename(  dataElement.id = id ) %>%
+                    group_by( dataElement.id ) %>%
+                    summarise( 
+                        Group = paste( name, collapse = " / ")
+                        ) ,
+                by = 'dataElement.id'
+                ) %>%  
+                  
+            # dataSets  
+              
+            left_join(
+                dsde %>% select( dataElement.id, dataSet.id , dataSet)  ,
+                by = c( 'dataElement.id')
+                ) %>% 
+                
+            left_join( 
+                
+                md$dataSets %>% select( id, periodType, timelyDays
+                                , organisationUnits
+                                ) %>%
+                    
+                    bind_cols( dataEntryForm.id = md$dataSets$dataEntryForm$id  ) , 
+                
+                by = c( 'dataSet.id' = 'id' )
+                
+                ) %>% 
+                
+                left_join( md$dataEntryForms %>% 
+                                   select( id, name ) %>%
+                                   rename( dataEntryForm = name , dataEntryForm.id = id  )             
+              , by = 'dataEntryForm.id'  
+               
+               ) %>% 
+    
+                left_join( 
+                    
+                    n_facilities_assigned_to_datasets , by = 'dataSet.id'
+                    
+                ) %>%     
+                
+        # number reported       
+        # left_join( d.mal.reported.top.dataset %>%
+        #                group_by( dataElement.id ) %>%
+        #                summarise( 
+        #                    value = sum( val, na.rm = TRUE ) , 
+        #                    pVal = max( pVal, na.rm = TRUE )) , 
+        #            by = c( "dataElement.id" )   
+        #            
+        #            ) %>%
+            
+         left_join( percent_dataset_reporting_last_year  , 
+                    by = c( 'dataSet.id' = "dataSet")
+
+                    ) %>%
+ 
+            mutate( 
+        
+        val = ifelse( is.na( value ) , NA, as.integer( value ) )
+        
+        , frequency = case_when(
+            periodType %in% "Weekly" ~ 52 ,
+            periodType %in% "Monthly" ~ 12 ,
+            periodType  %in% "Quarterly" ~ 4 ,
+            periodType  %in% "Yearly" ~ 1 ,
+            TRUE ~ 1
+        )
+        
+        ,  Reports_Last_Year = as.integer( val )
+        
+        , expected = frequency * n_facilities * n_categoryOptions
+        
+        # , expected = forms_expected_lastyear * n_categoryOptions
+        # 
+        , pVal = ifelse( !is.na(expected) , val / expected , NA)
+        # 
+        , Include = if( is.na( downloaded ) ){
+              ifelse( pVal>.25, "Y" ,  NA ) 
+              
+              } else {
+                
+                ifelse( dataElement.id %in% downloaded ,  
+                      "Y" , NA ) 
+                }
+        
+    ) %>% 
+    
+    mutate( 
+        Percent_Reported = sprintf("%1.2f%%", 100 * pVal ) 
+    )  %>% 
+    
+    rename( expected_facilities = n_facilities , pReporting_Data_Element  = pVal ) %>%
+    
+    select( dataElement.id, dataElement , Include,
+            Reports_Last_Year , 
+            expected_facilities,  
+            Percent_Reported , 
+            zeroIsSignificant ,  periodType, dataSet, Group ,
+           categoryCombo , categories, timelyDays , 
+           dataEntryForm ) %>%
+        
+    arrange( -Reports_Last_Year,  dataElement )
+
+    )
+    
+    names( data_element_info ) = names.searches
+    
+    # file.copy( 'dataElements_template.xlsm', de.review.xlsx )
+    
+    try( openxlsx::write.xlsx( data_element_info , 
+                               de.review.xlsx ) 
+         )
+    
+    
+    }
+    
+
+```
+
+```{r dataElement_Selection. }
+
+  
+    # if exist, open excel file
+    if ( file.exists( de.review.xlsx ) 
+         # & params$display_reports == TRUE 
+         ){
+        
+        browseURL( de.review.xlsx )
+        
+    }  
+    
+    
+```
+
+## Selected Key ELements
+
+
+```{r data_elements_include., eval = FALSE  }
+    
+    sheets = excel_sheets( de.review.xlsx ) 
+    
+    use_these_sheets = sheets %in% c( "malaria_stock", "stock", "pop", "attendance", "opd" , "ipd" , "malaria_items", "deaths" )
+    
+    target_sheets = sheets[ use_these_sheets ]  
+    
+    # get selected rows from every spreadsheet tab
+    de.include = map_df(  seq_along( target_sheets ) , 
+                         ~readxl::read_xlsx( de.review.xlsx ,  sheet = target_sheets[.x] ) %>% 
+                             filter( !is.na(Include) ) ) %>%
+        
+        distinct( dataElement.id, .keep_all = TRUE ) %>%
+            
+            mutate( previously_downloaded =  dataElement.id %in% downloaded )
+            
+
+  rmarkdown::paged_table( de.include )
+
+```
+
+### Selected Elements by Topic
+
+```{r}
+
+sheets = excel_sheets( de.review.xlsx ) 
+
+topics = c( '', '', '', '', '',  "Confirmed", 'Suspected', '', '', 'Attendance', 'Fever', 
+            'Attendance', 'ANC', 'Deaths', 'Pop' , 'Stock', 'Stock' )
+
+de.include = 
+    map_df(  seq_along( sheets ) , 
+         ~readxl::read_xlsx( de.review.xlsx ,  sheet = sheets[.x] ) %>%
+             mutate( Search = sheets[.x] , 
+                     topic = factor( Search, levels = sheets ,
+                                     labels = topics ) 
+                     ) %>%
+           filter( !is.na( Include ) ) %>%
+           select( Search, topic , dataElement.id , dataElement ) 
+) 
+
+de.include = de.include %>%
+    semi_join( de.include , by = c("dataElement.id", "dataElement") ) %>%
+    group_by( dataElement.id, dataElement ) %>% 
+    summarise( topic = paste0( unique( topic ), collapse = "")) %>% 
+    distinct() %>%  
+    arrange( topic, dataElement ) 
+    
+
+ de.include.xlsx = paste0( dataset.directory , 
+                             dhis_instance , 
+                             "_dataElements_selected.xlsx" )
+ 
+# if file exists, rename
+  if ( file.exists( de.include.xlsx) & params$create_new   ){ 
+        
+        file.rename( de.include.xlsx ,
+                     paste0( de.include.xlsx , 
+                             format(Sys.time(), "%b%d%Y")
+                                                        )
+                     )
+     }
+ 
+ 
+ if ( file.exists( de.include.xlsx) | params$create_new  ) {
+   
+   try( openxlsx::write.xlsx( de.include , de.include.xlsx ) )
+   
+ }
+
+ # open file 
+if ( file.exists(  de.include.xlsx  ) ) {
+       
+       browseURL(  de.include.xlsx  ) 
+       
+   }
+
+```
+
+### Table summary
+
+```{r data_element_table }
+
+# read variables and topics from de.include spreadsheet
+de.include = readxl::read_excel( de.include.xlsx  )
+
+# Get data elements meta-details
+
+meta_details = d.mal.reported %>%  
+                   ungroup %>% 
+                   select( dataElement , categories , dataSet, n_facilities, zeroIsSignificant , periodType, timelyDays )
+                
+## Combine
+data_element_table = de.include %>%
+  
+    
+    left_join( 
+        meta_details  
+        , by = "dataElement"
+) %>% 
+
+    group_by( dataElement.id ) %>%
+    summarise_all( 
+        funs( paste( unique(.) , collapse = ';\n' ) ) 
+        ) %>%
+    
+    mutate( topic = factor( topic , levels = unique( topics ) ) ) %>% 
+    
+    arrange( topic, dataElement )
+    
+
+data_element_table %>% rmarkdown::paged_table(.) 
+
+
+```
+
+
 ## Request Data Totals 
 
 ```{r data_totals}
@@ -1062,9 +1412,13 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
     nde = nrow( de.include )
     
+    new.variables.request = sum( !de.include$dataElement.id %in% downloaded )  > 0 
+    
+    new.variables = de.include %>%
+      filter( !dataElement.id %in% downloaded )
 
     # if doesn't exist or creating new, get dataset
-    if ( nde > 0 & params$create_new | !file.exists( data.totals.file ) ){
+    if ( nde > 0 & ( params$create_new | !file.exists( data.totals.file ) | new.variables.request ) ){
     
         data_totals = api_data( 
             
@@ -1077,16 +1431,9 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
         print( paste( "TOTAL:", 
                        scales::comma( nrow( data_totals ) ) , 
                        "records"  ) )
-    
-    } else {
         
-        # load previously downloaded dataset
-        data_totals = readRDS( data.totals.file )
-    }
+    # rename old one
     
-    # if new dataset, rename old one
-    if ( file.exists( data.totals.file ) & params$create_new ){
-      
       # Retrieve access data 
       date_file = file.info( data.totals.file )$ctime 
         
@@ -1095,11 +1442,17 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
                             format( date_file , "%b%d%Y" )
                             )
                      )
-    }
-    
-    
+
     if ( !file.exists( data.totals.file) ) saveRDS( data_totals , data.totals.file )
         
+    
+    } else {
+        
+        # load previously downloaded dataset
+        data_totals = readRDS( data.totals.file )
+    }
+    
+
     # get date
     data_totals_date = file.info( data.totals.file )$mtime
         
@@ -1109,6 +1462,7 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
 ## Request Data Details 
 
+
 ```{r data_details}
 ## DataElements : details 
 
@@ -1116,9 +1470,7 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
                                 dhis_instance, 
                                 "_details.rds" )
 
-    nde = nrow( de.include )
-
-    if ( nde > 0 & params$create_new | !file.exists( data.details.file )  ){
+    if ( nde > 0 & ( params$create_new | !file.exists( data.details.file ) | new.variables.request ) ){
             
         data_details = api_data( 
             
@@ -1134,24 +1486,24 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
                   scales::comma( nrow( data_details ) ) , 
                   "records"  ) )
     
-    }
     
-    if ( file.exists( data.details.file ) & params$create_new ){
-      
-        # Retrieve access data 
-        date_file = file.info( data.details.file )$ctime 
-        
-        file.rename( data.details.file ,
+     # Retrieve access data 
+    date_file = file.info( data.details.file )$ctime 
+
+     if (file.exists( data.details.file )){   
+       file.rename( data.details.file ,
                      paste0( data.details.file , "." ,
                             format( date_file , "%b%d%Y" )
                             )
                      )
-    }
+     }
     
-    if ( !file.exists( data.details.file) ) saveRDS( data_details , data.details.file )
+
+    saveRDS( data_details , data.details.file )
     
-    
-    data_details = readRDS( data.details.file )   
+    } 
+
+    if ( !exists( "data.details" ) )  data_details = readRDS( data.details.file )   
     
     
     # get date
@@ -1161,59 +1513,14 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 ```
 
 
-## Request Data Completeness (form submissions) 
-
-
-```{r download_dataset_submissions. }
-## DataElements : details 
-
-  dataset.submission.file = paste0( dataset.directory , 
-                     dhis_instance ,  
-                     "_dataset_submissions.rds" )
-
-    if ( !file.exists( dataset.submission.file ) | params$create_new ){
-            
-        data_submissions = api_data( 
-                                levels = levels.vector , 
-                                de.vars = de.include ,
-                                file = dataset.submission.file ,
-                                dsde = dsde ,
-                                details = FALSE , 
-                                submissions =  TRUE )
-        
-    } else {
-        
-        data_submissions = readRDS( dataset.submission.file ) 
-        
-    }         
-          
-    
-   # Rename existing file
-   if ( file.exists( dataset.submission.file ) & params$create_new ){
-        
-        file.rename( dataset.submission.file ,
-                     paste( dataset.submission.file ,
-                            format( Sys.time(), "%b%d%Y" )
-                            )
-                     )
-    }
-    
-    # save new
-    if ( !file.exists( dataset.submission.file) ) saveRDS( data_submissions , dataset.submission.file )
-
-    # get date
-    data_submissions_date = file.info( dataset.submission.file )$mtime
-
-```
 
 # Summarise data
 
 ```{r display_data.  }
 
-    output.filename = paste0( output_directory, "/" ,
-                              dhis_instance, "/", 
-                             dhis_instance, "_data." ,
-                             output.suffix
+    output.filename = paste0( origin.folder ,
+                              dhis_instance, "_data." ,
+                              output.suffix
                              ) 
 
 
@@ -1254,18 +1561,14 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
 
 
-## Trends
+# Trends
 
 ## Quantitative Quality
 
-```{r, updated_ous }
+```{r  updated_ous }
+
 source( "Trend code/Trend_Code.R")
 
-
-updated_facilities_file =  paste0( origin.folder , 
-                            dhis_instance,
-                            "_updated_facilities.rds" 
-                            ) 
 
 # use updated ous
 ous.updated = readRDS( updated_facilities_file ) %>% 
@@ -1300,17 +1603,27 @@ ous = ous.translated( .meta = md )
 
 ```
 
+### Orgunits with details ('translated')
 
 ```{r translate_data_details}
 
-if ( !exists( "data_details" ) ) data_details = readRDS( paste0(
-  dataset.directory , dhis_instance , "_details.rds"
-) 
-)
+if ( !exists( "data_details" ) ){
   
+  data.details.file = paste0(
+    dataset.directory , dhis_instance , "_details.rds"
+    ) 
+    
+  data_details = readRDS( data.details.file ) 
+
+  # get date
+    data_details_date = file.info( data.details.file )$mtime
+      
+}
   
 d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
-    left_join( ous.updated %>% select( orgUnit , lat , long , impute ) , 
+    left_join( ous.updated %>% 
+                 dplyr::select( orgUnit , lat. , long. , impute ) %>%
+                 rename( lat = lat. , long = long. ), 
                by = 'orgUnit'
                )  %>%
     # combine data element with category option combo
@@ -1320,12 +1633,154 @@ d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
 # glimpse(d)
 # count( d, level )
 # count( d, feature , level )
-# count( d, de.coc.name )
 
 ```
 
 
-```{r nest.dec }
+### orgunit with nested data 
+
+```{r nest }
+
+
+  nest_file = paste0( dataset.directory ,
+                           dhis_instance, 
+                           "_nest.rds" ) 
+
+ 
+ if ( file.exists( nest_file)  ){
+   
+   nest_file_date = file.info( nest_file )$ctime 
+   
+ } else {
+   
+   nest_file_date = data_details_date 
+}
+
+# Update nest if existing nest file older than details file
+  if (  params$create_new |  
+        nest_file_date <= data_details_date 
+        ) {
+      
+    # TODO: group_by depends on variables returned from ous.translated 
+    d.nest = d %>% 
+        complete( nesting( orgUnit, de.coc.name, period) ) %>%
+        mutate( value = as.integer( value ) ) %>%
+        group_by( level, level.name, feature
+                  # , children
+                  , orgUnit ,  orgUnit.name , lat, long , 
+                  parent_ou.name ,  de.coc.name,  
+                  dataElement, categoryOptionCombo,
+                  dataElement.name , categoryOptionCombo.name 
+                  
+                  ) %>%
+        nest( period, value ) 
+    
+    if ( file.exists( nest_file)  ){ 
+        
+      
+      # Retrieve access data 
+  
+        file.rename( nest_file ,
+                     paste0( nest_file , 
+                             format( nest_file_date , "%b%d%Y")
+                                                        )
+                     )
+    }
+    
+    saveRDS( d.nest , nest_file ) 
+    
+    nest_file_date = file.info( nest_file )$ctime 
+
+  } else {
+    
+    if ( file.exists( nest_file)  ){
+          
+          d.nest = readRDS( nest_file )
+      }
+  }
+
+     
+
+```
+
+### orgunit with nested time-series, and seasonal decomposition
+
+```{r nest.ts }
+
+
+  nest.ts_file = paste0( dataset.directory ,
+                           dhis_instance, 
+                           "_nest.ts.rds" ) 
+
+ if ( file.exists( nest.ts_file)  ){
+   
+   nest_ts_file_date = file.info( nest.ts_file )$ctime 
+   
+ } else {
+   
+   nest_ts_file_date = data_details_date 
+ }
+
+
+   
+  if ( params$create_new |
+       nest_ts_file_date < nest_file_date
+       ){ 
+        
+    
+    print( "creating time-series for each orgUnit-data element")
+
+    pb <- progress_estimated( nrow( d.nest ) )
+    
+    d.nest.ts = d.nest %>% 
+        mutate( 
+            ts = map( data,   ~ts.df(.x, .pb = pb)  ) ,
+            n = map_dbl( ts, ~sum( !is.na(.x) ) ) ,
+            total = map_dbl( ts , ~sum( .x, na.rm =  TRUE ) ) 
+            ) 
+    
+    
+    print( "performing decomposition for each orgUnit-data element")
+
+    pb <- progress_estimated( nrow( d.nest ) )
+    
+      d.nest.ts = d.nest.ts %>% 
+        mutate( 
+            dec = map_dbl( ts, 
+                       ~decompose.stl( .x , transform = "log", 
+                                       plot = FALSE ,
+                                       .pb = pb )  
+                       )
+            ) 
+    
+     if ( file.exists( nest.ts_file)  ){ 
+        
+        file.rename( nest.ts_file ,
+                     paste0( nest.ts_file , 
+                             format( nest_ts_file_date ,
+                                     "%b%d%Y")
+                                                        )
+                     ) 
+     }
+ 
+    saveRDS( d.nest.ts ,  nest.ts_file  )
+
+  } else {
+    
+    if ( file.exists( nest.ts_file) ){
+          
+          d.nest.ts = readRDS( nest.ts_file )
+      }
+
+}
+
+```
+
+### orgunit with nested seasonally decomposed time-series
+
+In this dataset, there is a unique row for every OU and DE.  Attached to each row is a dataset corresponding to the OU and DE.The nested dataset contains a time-series of the number of reports (ts), the total number of reporting periods (n), the total number of reports( total), and a measure of the seasonally adjusted error (dec). 
+
+```{r nest.dec , eval=FALSE}
 
   nest.dec_file = paste0( dataset.directory ,
                            dhis_instance, 
@@ -1350,36 +1805,18 @@ d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
                      )
     }
 
-  if ( (!exists( "d.nest.dec") | params$create_new ) ) {
+  if ( ( !exists( "d.nest.dec") | params$create_new ) ) {
       
-      
-    d.nest = d %>% 
-        complete( nesting(orgUnit, de.coc.name, period) ) %>%
-        mutate( value = as.integer( value ) ) %>%
-        group_by( level, level.name, feature, children, orgUnit ,  orgUnit.name , lat, long , 
-                  parent_ou.name ,  de.coc.name,  
-                  dataElement, categoryOptionCombo,
-                  dataElement.name , categoryOptionCombo.name 
-                  
-                  ) %>%
-        nest( period, value ) 
-    
-    saveRDS( d.nest , 
-             paste0( dataset.directory , dhis_instance , "_data_nest.rds") 
-    )
-    
-    # glimpse( d.nest )
-    
     pb <- progress_estimated( nrow( d.nest ) )
     
     d.nest.dec = d.nest %>% 
         mutate( 
-            ts = map( data,   ~ts.df(.x)  ) ,
+            ts = map( data,   ~ts.df(.x , .pb = pb )  ) ,
             n = map_dbl( ts, ~sum( !is.na(.x) ) ) ,
             total = map_dbl( ts , ~sum( .x, na.rm =  TRUE ) ) ,
             dec = map_dbl( ts, 
                        ~decompose.stl( .x , transform = "log", 
-                                       plot = FALSE, .pb = pb )  
+                                       plot = FALSE )  
                        )
             ) 
     
@@ -1390,10 +1827,528 @@ d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
 
 ```
 
+## Data element with nested number of reports
+
+unlike the nested datasets above, for which there is a unique row for every OU and DE, this dataset only has a unique row for every **DE**.  The nested data has the number of OU reporting each period. 
+
+
+
+```{r}
+
+library( sparkline )
+
+de_reported_by_month = count( d.nest.dec %>% unnest( data ), dataElement.name  , de.coc.name, period )
+
+
+pb <- progress_estimated( nrow( de_reported_by_month ) )
+    
+de.reported.ts = de_reported_by_month %>% 
+       rename( value = nn ) %>%
+       nest( period  , value ) %>%
+        mutate( 
+            ts = map( data,   ~ts.df(.x , .pb = pb )  ) ,
+            n = map_dbl( ts, ~sum( !is.na(.x) ) ) ,
+            total = map_dbl( ts , ~sum( .x, na.rm =  TRUE ) ) 
+          , dec = map_dbl( ts,
+                       ~decompose.stl( .x , transform = "log",
+                                       plot = FALSE )
+                       )
+          
+          , sparkline = map( ts, ~sparkline( .x %>% unlist ))
+          # , n_recent = 
+            ) 
+ 
+
+sparkline( de.reported.ts[1, ]$ts %>% unlist )
+
+ # View( de.reported.ts ) 
+ 
+```
+
+Chart of number of reports submitted with the key data elements
+
+```{r}
+library( sparkline )
+
+d1 = data_element_table %>% 
+  inner_join( de.reported.ts %>% 
+                select(dataElement.name, de.coc.name , sparkline ) %>% mutate( sparkline = map( sparkline, 1 ) )
+              , by = c('dataElement' = 'dataElement.name' ) 
+              ) %>%
+  datatable() 
+
+d1$dependencies <- append(d1$dependencies,
+                          htmlwidgets:::getDependency("sparkline") )
+
+
+
+```
+
+
+```{r, eval = FALSE }
+
+de.reported.ts[1, ]$ts[[1]] %>% plot
+
+library(ggfortify)
+library( magrittr )
+
+i = 7
+
+plot.ts = function( i ){ 
+    a = map( de.reported.ts$ts , autoplot  ) %>% extract(i)
+    a[[1]] + labs( title = de.reported.ts[ i , "de.coc.name" ] , 
+                   y = 'Reports', x = '' ,
+                   # subtitle = de.reported.ts[ i , "total" ] %>% 
+                   #     as.integer %>% scales::comma() ,
+                   subtitle =   de.reported.ts[ i , "dec" ] %>% round( 2 ))
+}
+
+# plot.ts(23)
+
+library( patchwork )
+# plot.ts(24) + plot.ts(23) 
+map( 1:5 , ~plot.ts( .x ) ) %>% reduce( `+` )
+
+library( ggrepel )
+# de_reported_by_month %>% 
+#     mutate( date = as.yearmon( period, "%Y%m" ) %>% as.Date() ) %>%
+#     ggplot( aes( x = date, y = nn , group = de.coc.name, color = de.coc.name ) ) +
+#     geom_line() +
+#     scale_x_date( limits = c(as.Date("2014-01-01") , as.Date("2030-01-01") ) ) +
+#     geom_text_repel( data =  de_reported_by_month %>% 
+#                          filter( period %in% "201810" ) %>%
+#                           mutate( date = as.yearmon( period, "%Y%m" ) %>% as.Date() ) ,
+#                      aes( label = de.coc.name ) ,
+#                      nudge_x = 10000 , 
+#                      segment.size  = 0.2,
+#                      segment.color = "grey50",
+#                      direction     = "y"
+#                      ) +
+#     labs(     y = 'Reports', x = '' ) + 
+#     scale_color_discrete( guide = FALSE ) +
+#     theme_minimal() 
+    
+```
+
+
+
+## Impute 
+
+```{r d.nest.impute}
+
+# data frame of datasets and data elements
+dsde = map_df( 1:length(md$dataSets$dataSetElements), 
+               ~map_df( md$dataSets$dataSetElements[[.x]], 
+                        ~as.matrix(.x) )) %>%
+    
+    rename( dataElement.id = dataElement , 
+            dataSet.id = dataSet ,
+            categoryCombo.id = categoryCombo
+            ) %>%
+    
+    left_join( md$dataElements %>% select( id, name, zeroIsSignificant ) ,
+               by = c('dataElement.id' = 'id' )) %>%
+    
+    rename( dataElement = name ) %>%
+    
+    left_join( md$dataSets %>% select( id, name ) ,
+               by = c('dataSet.id' = 'id' )) %>%
+    
+    rename( dataSet = name ) %>%
+    
+    left_join( md$categoryCombos %>% select( id, name ) ,
+               by = c('categoryCombo.id' = 'id' )) %>%
+    
+    rename( categoryCombo = name ) 
+
+de.all = unique( d.nest$dataElement.name )
+
+datasets = dsde %>%  filter( dataElement %in% de.all )  %>% pull( dataSet ) %>% unique
+
+# report of which data elements can recorded as zero for each dataset (split) ####
+element.form = dsde %>% 
+    filter( dataElement %in% de.all ) %>%
+    filter( dataSet %in% datasets[1:6]) %>%
+    select( dataElement.id, dataElement, dataSet, zeroIsSignificant ) %>%
+    arrange( dataElement ) %>%
+    spread( dataSet , zeroIsSignificant  ) 
+
+# element.form %>% View
+
+element.form = dsde %>% 
+    filter( dataElement %in% de.all ) %>%
+    filter( dataSet %in% datasets[7:length(datasets)] ) %>%
+    select( dataElement.id, dataElement, dataSet, zeroIsSignificant ) %>%
+    arrange( dataElement ) %>%
+    spread( dataSet , zeroIsSignificant  ) 
+
+# data.frame of ous assigned to datasets ####
+
+ou.dataset = # data.frame with each orgunit - dataset combination (long form)
+    
+    md$dataSets %>% 
+    
+    select( id, name, organisationUnits ) %>%
+    
+    rename( dataSet.id = id , dataset.name = name ) %>%
+    
+    unnest %>% as_tibble() %>%
+    
+    # add in date OU 'opened'
+    left_join( md$organisationUnits %>% select( id , openingDate, closedDate ) , by = "id" ) %>%
+    
+    rename( organistionUnit = id ) 
+
+# choose data element ####
+
+de.selected = de.all[ 21 ] #"NMCP OPD Confirmed Malaria Cases Through RDT
+
+# de.selected = de.all[17] # IDSR Malaria [zero is recorded]
+
+
+#  Data from 1 data element ( may contain >1 combos )
+
+x = d.nest %>% filter( dataElement.name %in% de.selected )
+
+
+categoryOptionCombo.for.dataElement = x %>% 
+    
+    filter( dataElement.name %in% de.selected ) %>%
+    
+    select( categoryOptionCombo , categoryOptionCombo.name )     %>% 
+    
+    unique 
+
+# categoryOptionCombo.for.dataElement # 1 row=1 for <5years (Malawi)
+
+categoryOptionCombo.selected = categoryOptionCombo.for.dataElement %>% 
+    filter( row_number() == 1 ) %>%
+    .$categoryOptionCombo.name
+
+
+
+```
+
+###  x: Data from 1 data element ( may contain >1 combos )  
+
+```{r}
+#  Data from 1 data element ( may contain >1 combos )
+
+x = d.nest %>% filter( dataElement.name %in% de.selected ,  
+                       categoryOptionCombo.name  %in% categoryOptionCombo.selected ) 
+
+```
+
+### x.ts
+
+```{r}
+
+library(forecast)
+library( ggfortify)
+library(imputeTS)
+
+# see https://cran.rstudio.com/web/packages/sweep/vignettes/SW01_Forecasting_Time_Series_Groups.html 
+
+log_1 = function( x ){
+  isZero = which( x == 0 )
+  x[ isZero ] = 0.000001 
+  x = log( x )
+  return( x )
+}
+
+# helper function to mimic log but allows zero
+ihs = function(x) log( x +sqrt( x**2 + 1 ) ) 
+ihs. = function(y) ( exp( 2 * y) - 1 ) / (2 * exp(y) )
+
+
+my.tsclean = function( .x  , log = FALSE, .pb= NULL ){
+  
+  # progress bar
+    update_progress( .pb ) 
+  
+  if ( sum( !is.na(.x) ) > 1 ){
+    
+    if ( log ){ 
+      
+      .x. = tsclean( log_1( .x ) %>% exp)
+      # forces values to be positive (log)
+      
+    } else {
+
+      .x. = tsclean(  .x )
+   } 
+    
+
+    return( .x. )
+  } else .x  # return original data
+}
+
+# test
+# .x = ts.df( x[ 1, ]$data[[1]])
+# .x = ts.df( x[ 100, ]$data[[1]])
+# my.tsclean( .x  )
+# my.tsclean( .x  , 0)
+# my.tsclean( .x  ,  "auto")
+
+
+# more tests... (need to remove zeros with log_1 function to get it to work )
+# ts.clean.list = list( nrow(x) )
+# x = d.nest %>% filter( dataElement.name %in% de.selected ,  
+#                        categoryOptionCombo.name  %in% categoryOptionCombo.selected ) 
+# 
+# for ( i in 1:nrow(x)){
+#   ts.clean.list = my.tsclean( ts.df( x[ i, ]$data[[1]] ) , log = TRUE  )
+# }
+
+
+pb = progress_estimated( nrow( x ) )
+
+x.ts = x[ , ] %>% 
+       mutate( 
+            ts = map( data,  ~ts.df(.x, .pb = pb)  ) ,
+            n = map_dbl( ts, ~sum( !is.na(.x) ) ) ,
+            total = map_dbl( ts , ~sum( .x, na.rm =  TRUE ) ) 
+            ) %>%
+       mutate( 
+            ts.clean = map( ts , ~my.tsclean( .x ) ) 
+            # , total.clean =  map_dbl( ts.clean , ~sum( .x, na.rm =  TRUE ) ) 
+             , ts.clean.log = map( ts , ~my.tsclean( .x , log = TRUE ) )
+         )
+
+
+```
+
+### Total values and number reported 
+
+```{r}
+
+# functions to convert NA to zero , then add
+na_to_y <- function(x, y){
+  x[is.na(x)] <- y
+  x # you need to return the vector after replacement
+}
+
+add <- function( ts.list ){
+  ts.list = map( ts.list , na_to_y, 0 ) 
+  Reduce("+", ts.list ) 
+}
+ # test: add(  x.ts$ts  ) ; add(  x.ts$ts.clean   )
+
+
+# Total among those with minimum no. months reporting
+min.months.reported = 24
+
+total = add(  x.ts %>% 
+                filter( n >= min.months.reported ,
+                        feature == 'Point' ) %>% 
+                pull(ts)   
+              ) 
+
+# Total *after cleaning* among those with minimum no. months reporting
+total.clean = add(   x.ts %>% 
+                       filter( n >= min.months.reported ,
+                        feature == 'Point' ) %>%  
+                       pull( ts.clean )     )
+
+# Chart total of data element by month, Raw and Cleaned
+
+ts.gg = ggplot() + 
+    geom_line( data = total %>% ts_to_df() , 
+               aes( x = date , y=Y), color = 'black', size = 1) +
+  
+    geom_line( data = total.clean  %>% ts_to_df() ,
+               aes( x = date ,y=Y),
+               color = 'blue', size = 1 ) +
+    
+    labs( title = de.all[ 21 ], 
+          subtitle = categoryOptionCombo.selected , 
+          caption = paste( params$dhis_instance , 
+                           "as reported on" , 
+                           substr( data_details_date , 1, 10 ) 
+          ) , 
+          y = "Cases" , x = "Month") +
+    scale_y_continuous( label = comma ) +
+    theme_minimal()
+
+
+ts.gg
+
+
+# no. reports per month 
+
+ de.reported.ts = function( dataset = x.ts 
+                            # , data = quo(ts) 
+                            , .min.months.reported = 1 ){
+   dataset %>% 
+   filter( n >= min.months.reported ,
+           feature == 'Point' ) %>% 
+   unnest( data ) %>% 
+   select( orgUnit, de.coc.name, period , value) %>% 
+     
+   count( de.coc.name, period ) %>%
+   rename( value = n ) %>%
+       nest( period  , value ) %>%
+        mutate( 
+            ts = map( data,   ~ts.df(.x )  ) ,
+            n = map_dbl( ts, ~sum( !is.na(.x) ) ) ,
+            total = map_dbl( ts , ~sum( .x, na.rm =  TRUE ) ) 
+            # , dec = map_dbl( ts, 
+            #            ~decompose.stl( .x , transform = "log", 
+            #                            plot = FALSE )  
+            #            )
+            ) 
+ } 
+ 
+ # de.reported.ts()
+
+# Chart number of reports submiteed per month, filtered for 
+ # minimum number of months reporting 
+
+reported.total = add(   de.reported.ts( 
+  .min.months.reported = 1
+  ) %>% 
+    pull( ts )     
+  ) %>%  
+  ts_to_df 
+
+ max.ever.reported = x.ts %>% filter( feature == 'Point' ) %>% nrow
+ 
+ max.reported.minimum.months = x.ts %>% 
+   filter( feature == 'Point' ,
+           n >= min.months.reported 
+           ) %>% nrow
+  
+
+reported.gg = ggplot() + 
+    # geom_line( data = df.total , aes( x = date , y=Y), color = 'black') +
+    geom_line( data = reported.total , 
+               aes( x = date , y = Y ), color = 'black', size = 1 ) +
+
+    labs( title = 'Number facilities reporting each month' , 
+          # subtitle = categoryOptionCombo.selected , 
+          caption = paste( params$dhis_instance , 
+                           "as reported on" , 
+                           substr( data_details_date , 1, 10 ) 
+          ) , 
+          y = "No. Facilities Reporting" , x = "Month") +
+    scale_y_continuous( label = comma ) +
+    theme_minimal() + 
+    expand_limits(y = c(0, 1.2 * max(reported.total$Y )) ) +
+    
+    annotate( 'segment' , x = min( reported.total$date ) ,
+              xend = max( reported.total$date ) ,
+              y = max.ever.reported , yend = max.ever.reported ,
+              color = 'purple' ) +
+   annotate( 'text' , x = min( reported.total$date ) ,
+              y = max.ever.reported , hjust = 0 , vjust = -.2 ,
+              label = 'Total number of facilities ever reporting',
+              color = 'purple' ) +
+
+  annotate( 'segment' , x = min( reported.total$date ) ,
+              xend = max( reported.total$date ) ,
+              y = max.reported.minimum.months ,
+            yend = max.reported.minimum.months ,
+              color = 'blue' ) +
+   annotate( 'text' , x = min( reported.total$date ) ,
+              y = max.reported.minimum.months , hjust = 0 ,
+             vjust = -.5,
+              label = 'Number facilities reporting at least 24 months',
+              color = 'blue' ) 
+  
+   # annotate( 'text' , x = mean( reported.total$date ) , 
+   #            y = 400 , hjust = .5 , 
+   #            label = 'Number facilities reporting each month',
+   #            color = 'black' )
+
+reported.gg
+
+## Combine totals with no. reports 
+library( patchwork )
+ts.gg + reported.gg + plot_layout(ncol = 1, heights = c(3, 3))
+
+
+
+
+
+
+```
+
+```{r other_ts_trend_plots, eval=FALSE }
+
+# annualize 
+ts.annual = function( ts , .fun = sum ){
+  aggregate( ts , nfrequency = 1 , FUN = .fun ) %>%
+                 data.frame( date=as.Date(time( . )) , 
+                             Y= as.matrix( . ) )
+}
+
+ggplot() + 
+    geom_col( data =  ts.annual( total ) , 
+               aes( x = date , y=Y ), fill = 'black') +
+    scale_y_continuous( label = comma ) +
+    labs(title = "Annual Case Counts (actual)", x = "", y = "Cases" )
+
+ggplot() + 
+    geom_col( data =  ts.annual( total.clean ) , 
+               aes( x = date , y=Y ), fill = 'blue')  +
+    scale_y_continuous( label = comma ) +
+    labs(title = "Annual Case Counts (estimated)", x = "", y = "Cases" )
+
+
+# Rolling mean
+library( roll )
+ts.rolling = function( ts ){
+    
+     data.frame(
+        date=as.Date(time( ts )), 
+         Y = roll_mean( as.matrix( ts ), width = 12  )
+        )
+}
+
+ggplot() + 
+    geom_line( data =  ts.rolling( total ) , 
+               aes( x = date , y = Y ), color = 'black') +
+    geom_line( data = ts.rolling( total.clean ) , 
+               aes( x = date , y=Y ), color = 'blue') 
+
+# Examples
+min.months.reported = 36
+max.months.reported = 36 
+
+x.ts.size = x.ts %>% 
+  filter( n >= min.months.reported ,  n <= max.months.reported ) 
+
+xts.clean.df <- data.frame(
+  date = map( x.ts.size$ts.clean  , ~as.Date( time( .x ) ) ) %>% unlist ,   Y = map( x.ts.size$ts.clean  , ~as.matrix( .x ) ) %>% unlist , 
+  n = cut( x.ts.size$n , 3 ) ,
+  orgUnit = x.ts.size$orgUnit,
+  data = 'clean'
+  )
+
+xts.df <- data.frame(
+  date = map( x.ts.size$ts  , ~as.Date( time( .x ) ) ) %>% unlist ,   Y = map( x.ts.size$ts  , ~as.matrix( .x ) ) %>% unlist , 
+  n = cut( x.ts.size$n , 3 ) ,
+  orgUnit = x.ts.size$orgUnit ,
+  data = 'raw'
+  )
+
+ggplot() + 
+    geom_line( data = xts.clean.df , aes( x = date , y = Y,
+                                          group = orgUnit , color = data)
+               ) +
+  geom_line( data = xts.df , aes( x = date , y = Y, 
+                                          group = orgUnit , color = data)
+               ) + 
+  facet_grid( orgUnit ~ .)
+
+
+
+```
+
 
 ```{r nest.dec_summary_by_element }
 
-  nest.dec_file = paste0( origin.folder ,
+  nest.dec_file = paste0( dataset.directory ,
                            dhis_instance, 
                            "_nest.dec.rds" ) 
 
@@ -1417,7 +2372,7 @@ d = dataset.translated( data_details, .ous = ous , .meta = md  ) %>%
 # choose data element ####
 de.coc.all = unique(d$de.coc.name)
 
-de.coc.selected = de.coc.all[26] # "HMIS Malaria – New Case (under 5)"
+de.coc.selected = de.coc.all[13] # "NMCP OPD Suspected Malaria Cases Tested For Malaria Through RDT_<5Yrs"
 
 
 # model d.nest for selected element/catoegory: "HMIS Malaria – New Case (under 5)" ####
@@ -1429,50 +2384,328 @@ x.dec = d.nest.dec %>% filter( de.coc.name %in% de.coc.selected )
 
 ```{r}
 
-# x.dec$months = cut(x.dec$n , breaks = c(0,12,24,36,48))
+# function to take list of time-series and summarise them
+# filters based on number of non-missing values
+# returns a single time-series with same time-basis (e.g. monthly)
 
-x.dec %>% filter( feature %in% "Point") %>%
-  mutate( period = cut(n, breaks = 5, pretty = T) ) %>%
-  ggplot() +  
-  geom_boxplot( aes( x = period , y = total/n ) ) +
-  scale_y_log10() 
+ts_sum = function( nest.ts , 
+                   col ,
+                   min.months.reported = 0 ,
+                   max.months.reported = 60 
+                   ){
+
+    # functions to convert NA to zero , then add
+    na_to_y <- function(x, y){
+      x[is.na(x)] <- y
+      x # you need to return the vector after replacement
+    }
+    
+    add <- function( ts.list ){
+      ts.list = map( ts.list , na_to_y, 0 ) 
+      Reduce("+", ts.list ) 
+    }
+     # test: add(  x.ts$ts  ) ; add(  x.ts$ts.clean   )
+
+    sum.ts = add(  nest.ts   %>% filter( 
+      n >= min.months.reported , 
+      n <=  max.months.reported ) %>% pull( !!col )   
+      ) 
+    
+    return( sum.ts )
+}
+
+# test
+# ts_sum( x.ts , quo(ts) )
+
+# function to take list of time-series and COUNT number non-missing
+# filters based on number of non-missing values
+# returns a single time-series with same time-basis (e.g. monthly)
+
+ts_count = function( nest.ts , 
+                     col ,
+                     min.months.reported = 0 ,
+                     max.months.reported = 60 
+                   ){
+
+  one_if_not_na <- function( x ){
+      x[!is.na(x)] <- 1
+      x[is.na(x)] <- 0
+    x 
+  }
+
+  num_nonNA <- function( ts.list ){
+    ts.list = map( ts.list , one_if_not_na ) 
+    Reduce("+", ts.list ) 
+  }
+    
+  count.ts = num_nonNA(  nest.ts   %>% filter( 
+      n >= min.months.reported , 
+      n <=  max.months.reported ) %>% pull( !!col )   
+      ) 
+    
+    return( count.ts )
+}
+
+# test
+# ts_count( x.ts , quo(ts) )
+
+ts.annual = function( ts , .fun = sum ){
+      ts.agg = aggregate( ts , nfrequency = 1 , FUN = .fun ) 
+      return(ts.agg)
+}
+
+# Test
+# ts_count( x.ts , quo(ts) ) %>% ts.annual()
+
+ts_to_df = function( ts ){
+      df <- data.frame( 
+        date=as.Date(time( ts )) , 
+        Y= as.matrix( ts ) 
+      )
+      
+      return( df )
+}
+
+# Test
+# ts_count( x.ts , quo(ts) ) %>% ts.annual() %>% ts_to_df()
+
+raw.count = ts_count( x.ts , quo(ts) ) %>% ts.annual() %>% ts_to_df() %>%
+  mutate( data ='raw' )
+
+min_non_miss = c( 0 , 12, 24, 36, 48 )
+map( min_non_miss , ~ts_count( x.ts , quo(ts), .x ) %>% 
+       ts.annual() %>% ts_to_df() %>% .$Y)
 
 
-x.dec %>% filter( feature %in% "Point") %>%
-  group_by( orgUnit , n )  %>%
-  summarise( mean = total/n ) %>%
-  ggplot() +  
-  geom_point( aes( x = n , y = mean )   ) +
-  scale_y_log10() +
-  scale_x_continuous( limits = c(0,48))
+clean.count = ts_count( x.ts , quo(ts.clean) ) %>% 
+  ts.annual() %>% ts_to_df() %>%
+  mutate( data ='cleaned' )
+
+raw.sum = ts_sum( x.ts , quo(ts) ) %>% ts.annual() %>% ts_to_df() %>%
+  mutate( data ='raw' )
+
+clean.sum = ts_sum( x.ts , quo(ts.clean) ) %>% 
+  ts.annual() %>% ts_to_df() %>%
+  mutate( data ='cleaned' )
+
+raw.avg =  ( 
+   ( ts_sum( x.ts , quo(ts) ) %>% ts.annual() ) / 
+   ( ts_count( x.ts , quo(ts) ) %>% ts.annual() )
+                          ) %>% 
+ts_to_df() %>%
+  mutate( data ='raw' )
+
+clean.avg = ( 
+   ( ts_sum( x.ts , quo(ts.clean) ) %>% ts.annual() ) / 
+   ( ts_count( x.ts , quo(ts.clean) ) %>% ts.annual() )
+                          ) %>% 
+ts_to_df() %>%
+  mutate( data ='cleaned' )
+
+ggplot() + 
+    geom_line( data = raw.avg  , aes( x = date , y = Y) , color = 'black') +
+    geom_line( data = clean.avg , aes( x = date , y = Y), color = 'blue') 
+
 
 ```
 
-## Aggregations
+## impact of cleaning by number of months with non-missing reports
 
 ```{r}
-# summarise time-series lengths by parent
+min_non_miss = c( 0 , 21, 24, 48 )
+max_non_miss = c( min_non_miss[ 2:length( min_non_miss ) ] , Inf )
 
-x.dec %>% group_by( parent_ou.name ) %>%
-  summarise( r1 = range(n)[1] ,
-             r2 = range(n)[2] ,
-             mean_n = mean( n ) ,
-             num = n(),
-             mean_dec = mean( dec , na.rm = T)
-             
-             ) %>%
-  View
+raw.sum = map2_df( min_non_miss , max_non_miss, ~ts_sum( x.ts , quo(ts), .x , .y ) %>% 
+                 # ts.annual() %>% 
+                   ts_to_df() %>%
+                 mutate( data ='raw', min_n = .x %>% factor, min_y = .y %>% factor )
+)
+
+clean.sum = map2_df( min_non_miss , max_non_miss, ~ts_sum( x.ts , quo(ts.clean), .x , .y ) %>% 
+                 # ts.annual() %>% 
+                   ts_to_df() %>%
+                 mutate( data ='clean', min_n = .x %>% factor, min_y = .y %>% factor )
+)
+
+clean.llog.sum = map2_df( min_non_miss , max_non_miss, 
+                            ~ts_sum( x.ts , quo(ts.clean.log), .x , .y ) %>% 
+                 # ts.annual() %>% 
+                   ts_to_df() %>%
+                 mutate( data ='clean.log', min_n = .x %>% factor, min_y = .y %>% factor )
+)
+
+ggplot() + 
+    geom_line( data = raw.sum  , aes( x = date , y = Y, group = min_n, color = data) ) +
+    geom_line( data = clean.sum  , aes( x = date , y = Y, group = min_n, color = data) ) +
+    geom_line( data = clean.log.sum  , aes( x = date , y = Y, group = min_n, color = data) ) +
+    facet_grid( min_n ~ . , scales = 'free' )
+
 
 ```
 
+
+## MAPE of imputation
+
+```{r}
+
+ interp.mape = function ( .x, n = NULL , tests = 25  
+                              #' The na.interp function imputes missing values
+                              #' This function attempts to estimate the mean absolute percentage error (MAPE) 
+                              #' by simulating a number of missing values and then calculating the MAPE of the 
+                              #' replacement values with the original values          
+ ) 
+ {
+   
+     nonNA = which( !is.na( .x ) & ( .x > 0 ) %>% as.logical()  )
+     
+     if ( is.null( n ) ){
+         n = round( length( nonNA )  / 5 , 0 )
+     }
+     
+     mape = list( tests )
+     
+     for ( test in 1:tests ){ 
+       
+         simulate.missing.index = sample( nonNA , n ) %>% 
+           as.integer() %>% unique() 
+         
+         simulate.missing.index = simulate.missing.index[ order(simulate.missing.index) ]
+         
+         x.sim = .x 
+         
+         x.sim[ simulate.missing.index ] =  NA
+         
+         replacements <- my.tsclean( x.sim , log = TRUE )
+         
+         differences = replacements[ simulate.missing.index ] - .x[ simulate.missing.index ]
+         
+         mape[ test ] =  sum( differences / .x[ simulate.missing.index ] ) / length( differences )
+         
+     }
+     
+     return( list( 
+       mean = mean( unlist( mape ) , na.rm = TRUE  ) ,
+       sd = sd( unlist( mape ) , na.rm = TRUE  ) 
+       )
+     )
+ }
+
+
+# Tests
+
+interp.mape( x.ts[ which( x.ts$n > 0 &  x.ts$n < 12  )[1] , ]$ts[[1]] )
+
+```
+
+
+## Regional time-series
+
+```{r}
+
+count( x.ts, level, parent_ou.name )
+
+regional.ts = x.ts %>% 
+  filter( n >= 48 , !is.na( parent_ou.name ) , level == 4 
+          ) %>%
+  group_by( parent_ou.name ) %>%
+  summarise( 
+    n = n() 
+    ) 
+
+regional.ts$ts.clean = map( regional.ts$parent_ou.name , 
+                      ~ts_sum( x.ts %>% filter( n >= 48 ,
+                                                parent_ou.name == .x ),
+                                                quo(ts.clean) ) 
+                               ) 
+
+# see all districts   
+gg.regional.ts = 
+  regional.ts %>% unnest %>% 
+  bind_cols( map_df( regional.ts$ts.clean, ~ts_to_df(.x) )
+             ) %>% 
+  group_by( parent_ou.name ) %>%
+  mutate( Y = scale( Y ) ) %>%
+  ungroup %>%
+  ggplot() +
+  geom_line( aes( x=date, y= Y, group = parent_ou.name, color = n ))
+
+plotly::ggplotly( gg.regional.ts )
+
+
+# examine specific district
+dataset =  x.ts %>% 
+  filter( n >= 48 , parent_ou.name %in% "Nsanje-DHO" ) %>%
+  select( orgUnit.name , parent_ou.name , n, ts.clean, ts )
+
+gg.dho.ts = 
+  dataset %>% unnest %>% 
+  bind_cols( map_df( dataset$ts, ~ts_to_df(.x) )
+             ) %>% 
+  group_by( orgUnit.name ) %>%
+  mutate( Y = scale( Y ) ) %>%
+  ungroup %>%
+  ggplot() +
+  geom_line( aes( x=date, y= Y, group = orgUnit.name , color = n ))
+
+plotly::ggplotly( gg.dho.ts )
+
+```
+
+
+## Aggregations
 
 Table of District level Error
 
 ```{r}
 tsd.parent = x.dec %>% 
   filter( feature %in% "Polygon" ) %>%
-  dplyr::select( orgUnit.name , level , total, dec )
+  dplyr::select( orgUnit.name , level , total, dec ) %>%
+  mutate( bins = cut( dec , breaks = seq(0, 1, .1 ),  labels = seq(0.05, .95, .1 ) ) %>% 
+              as.character() %>% as.numeric() )
 
+kable( tsd.parent )
+    
+# hist( tsd.parent ) 
+    
+library( ggrepel ) 
+
+quality = cut( tsd.parent$dec, breaks = c( 0, .25, .5 , 1, Inf) , 
+                         labels = c('Best','Good', 'Sub-Standard', 'Poor') )
+
+ggplot(  tsd.parent, aes(x = bins, y = 1, fill = quality) ) +
+  geom_bar(stat = "identity", colour = "black", width = .1 , alpha = .5  ) +
+  geom_text_repel( aes(label= ifelse( bins >= .5 , orgUnit.name, "") ),
+             # position=position_stack(vjust=0.5), 
+             colour="black",
+             segment.size = 1 ,
+             nudge_y = 2, 
+             direction = 'y' ) +
+theme_minimal() +
+scale_fill_discrete( drop = FALSE ) +
+labs( y = 'Count', x = 'Deviation' )
+
+
+```
+
+
+```{r}
+
+x.dec %>% 
+    filter( parent_ou.name %in% "Chiradzulu-DHO") %>%
+    select( orgUnit.name, feature, level.name, total , dec ) %>%
+    
+  ggplot(  aes(x = bins, y = 1, fill = quality) ) +
+  geom_bar(stat = "identity", colour = "black", width = .1 , alpha = .5  ) +
+  geom_text_repel( aes( label= orgUnit.name ),
+             # position=position_stack(vjust=0.5), 
+             colour="black",
+             segment.size = 1 ,
+             nudge_y = 2, 
+             direction = 'y' ) +
+theme_minimal() +
+scale_fill_discrete( drop = FALSE ) +
+labs( y = 'Count', x = 'Deviation' )
+    
 ```
 
 
@@ -1482,11 +2715,19 @@ library(ggfortify)
 
 tsd =  x.dec %>% 
   filter( feature %in% "Point" , 
-          parent_ou.name %in% "Chitipa-DHO" ) 
+          parent_ou.name %in% "Chitipa-DHO" 
+          ) %>% 
+  mutate( error = cut( dec, breaks = c(0, .25, .5, .75, 1, 1.25, 1.5, 1.75 , 2 , Inf ))
+          )
 
 summary( tsd$dec )
 
-ggplot( ) + geom_histogram( data = tsd , aes( x = dec )) 
+  g = ggplot( data = tsd , aes( x = error , y = 1 , label = orgUnit.name )  ) + 
+    geom_col(  ) +
+    scale_x_discrete(drop = FALSE) +
+    theme_bw()
+  
+  plotly::ggplotly( g )
 
 tsd.parent = x.dec %>% 
   filter( feature %in% "Polygon" , 
@@ -1589,7 +2830,7 @@ autoplot( d.forecast <- forecast(tsd.parent$ts[[1]] , h = 12, level = c(95) ),  
  
 ```
 
-# Data quality histograms
+# Data quality histograms for each data element
 
 ```{r x.dec_histogram }
 
@@ -1737,11 +2978,14 @@ quality_leaflet = function( element = NULL ,
           tag.map.title, HTML( element )
         )  
         
-    regionMap = leaflet() %>%
-            
-        addTiles(  urlTemplate = 
+    regionMap = leaflet(width=900, height=650) %>%
+              
+          # base map
+          # addProviderTiles("Hydda.Base") %>%
+      
+          addTiles(  urlTemplate =
                            "http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            )  %>% 
+            )  %>%
             
         addPolygons( data = map.region ,
                          group = 'Region' ,
@@ -1832,21 +3076,37 @@ n_elements = length( de.coc.all )
 
 html <- list()
 
-for (i in 1:n_elements) {
+i = 16  ; de.coc.all[16] # "NMCP OPD Confirmed Malaria Cases Through RDT_<5Yrs"
+
+ html <- c( html, 
+             list( h3( paste0( de.coc.all[i] 
+                               , "(", i, ")" 
+                       ) ),
+                 
+                 quality_leaflet( de.coc.all[i] , title.on.map = TRUE )
+                 
+                 )
+  )
+ 
+ tagList(html)
+ 
+ # Create for all elements ...
+ html <- list()
+ for (i in 1:n_elements) {
     
   html <- c( html, 
              list( h3( paste0( de.coc.all[i] 
                                , "(", i, ")" 
                        ) ),
                  
-                 quality_leaflet( de.coc.all[i] )
+                 quality_leaflet( de.coc.all[i] , title.on.map = TRUE )
                  
                  )
   )
                  
 }
 
-tagList(html)
+ tagList(html)
 
 # saveRDS( html, paste("leaflet", i , ".html" ) )
 
@@ -1863,8 +3123,11 @@ quality_ggMap = function( element = NULL ,
                             d.nest.dec. = d.nest.dec ,
                             subtitle = instance ,
                             .pb = NULL,
-                            radius_factor = 1e4 
+                            radius_factor = 1e2 
                           ){
+    
+    
+    x.dec = d.nest.dec. %>% filter( de.coc.name %in% element )
     
     x.dec$quality = cut( x.dec$dec, breaks = c( 0, .5, 1 , 2, Inf) , 
                          labels = c('Best','Good', 'Sub-Standard', 'Poor') )
@@ -1904,29 +3167,46 @@ quality_ggMap = function( element = NULL ,
     
     map.g = ggplot( regions.g.df ) + 
       aes( long, lat ) + 
-      geom_polygon( aes( group=group, 
-                         fill = cut(dec, 
-                                    breaks = c(0,.15,.25, .5, Inf)) 
-                         ) 
+      geom_polygon( aes( group = group 
+                         , fill = cut( dec,
+                         breaks = c(0,.15,.25, .5, Inf))
+                         # , fill = dec
+                         ) , alpha = .2  
                     ) +
       geom_path(color="white") +
-      geom_point( data = x.facilities , 
-                  aes( color = quality , size = total / radius_factor )
+      geom_point( data = x.facilities ,
+                  aes( color = quality , size = total  )
                   ) +
       coord_equal() +
       theme_map() +
       theme( legend.justification = c(1, 0), legend.position = 'right' ) +
-      scale_fill_brewer( "Region", drop = FALSE, palette = 'Reds' ) +
-      scale_color_brewer( "Facility", drop = FALSE, type = 'div'  ) +
-      scale_size_continuous( guide = FALSE )
+      # scale_fill_brewer( "Region", drop = FALSE, palette = 'Reds' , direction = -1 ) +
+      scale_fill_brewer( "Facility", drop = FALSE, type = 'div'  , direction = -1 , guide = FALSE ) +
+      scale_color_brewer( "Facility", drop = FALSE, type = 'div'  , direction = -1 ) +
+      scale_size_continuous( range = c( 1, 4 ) ) +
+      labs( subtitle = subtitle,  title = element )
     
     print( map.g )
     
 }
 
+# TEST:
+    quality_ggMap( element = de.coc.all[16] ) 
+    
+    x.dec = d.nest.dec. %>% filter( de.coc.name %in% element )
+    
+    x.dec$quality = cut( x.dec$dec, breaks = c( 0, .5, 1 , 2, Inf) , 
+                         labels = c('Best','Good', 'Sub-Standard', 'Poor') )
+    
+    ggplot( count( x.dec , quality ) ) + geom_col( aes( x = quality , y = nn  ) ) +
+        labs( title = 'Count of facilities', y = "", x = 'Quality' )
+    
 ```
 
 ```{r print_ggplots }
+
+
+quality_ggMap( element = de.coc.all[16] ) 
 
 n_elements = length( de.coc.all )
 

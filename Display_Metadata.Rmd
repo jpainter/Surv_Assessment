@@ -25,9 +25,10 @@ editor_options:
   chunk_output_type: console
   
 params:
-  dhis_instance: Kenya.demo
+  dhis_instance: Malawi
   data_directory: 
   output_directory: ./ # bug: only uses current directory
+  output_format: 
   cache: FALSE
   echo: FALSE
 ---
@@ -144,6 +145,7 @@ knitr::opts_chunk$set( echo = params$echo ,
 ```{r}
 
   meta_data_file = paste0( origin.folder ,
+                           "datasets/" ,
                            dhis_instance, 
                            "_metadata.rds" ) 
 

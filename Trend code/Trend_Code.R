@@ -54,12 +54,14 @@ ous.translated = function(  .meta = NULL,
                             open.only = TRUE  # limit to clinics currently open, only
                             ){
     
-    
+    # NB:  children missing  from some metadata (eg. Malawi )
     
     stopifnot( !is.null( .meta ) )
     
   
-     meta_cols = c( 'id', 'name', 'openingDate', 'closedDate', 'path', 'coordinates' , 'children')
+     meta_cols = c( 'id', 'name', 'openingDate', 'closedDate', 'path', 'coordinates' 
+                    # , 'children'
+                    )
     
     .meta$organisationUnits[ , meta_cols]  %>% 
         
@@ -68,8 +70,8 @@ ous.translated = function(  .meta = NULL,
         filter( if ( open.only ){ is.na(closedDate) } else { TRUE }  ) %>%  
         
         mutate(
-            feature = map_chr( coordinates, ~feature_type(.x ) ) ,
-            children = map_dbl( children, ~length(.) )
+            feature = map_chr( coordinates, ~feature_type(.x ) ) 
+            # , children = map_dbl( children, ~length(.) )
         ) %>%
 
         rowwise() %>%
@@ -108,7 +110,7 @@ ous.random = function( .level){  #samples OU id within OU level
 
 # TIME-Series  ####
 
-ts.df = function( data , start_year = NA , .pb = NULL ){
+ts.df = function( data , start = "201401" , end = NA , .pb = NULL ){
     
     # progress bar
     update_progress( .pb ) 
@@ -116,22 +118,32 @@ ts.df = function( data , start_year = NA , .pb = NULL ){
     # create time-series for selcted OU and dataElement (total: need to sum over category combo)
     d_ou_de = data
     
-    if ( nrow( d_ou_de) == 0) return( ts() )
-    
-    if ( !is.na(start_year) ){
-        d_ou_de = d_ou_de %>% filter( sub_str( period, 1, 4 ) >= start_year )
-    }
+    if ( nrow( d_ou_de ) == 0) return( ts() )
     
     values = d_ou_de$value
-    periods = d_ou_de %>% 
-        mutate( 
-            year = substr( period, 0 , 4 ) %>% as.integer() ,
-            month = substr( period, 5, 6 ) %>% as.integer()
-        )
     
-    ts_ou_de = ts( values , 
-                   start = c( periods[1,] %>% .$year , periods[1,] %>% .$month  ) , 
-                   end = c( periods[nrow(periods),] %>% .$year , periods[nrow(periods),] %>% .$month  ) ,
+    if ( is.na( end ) ) end = as.yearmon( Sys.Date() , "%Y%m" )
+    
+    if ( is.na( start ) )  start = d_ou_de$period[1] 
+    
+    start = start %>% as.yearmon(. , "%Y%m")
+    
+    
+    seq_dates <- seq.Date( as.Date( start ) , as.Date( end ) , by = "month") %>%
+      as.yearmon( . , "%Y%m" ) 
+    
+    
+    dataset.all.dates = data_frame( period = seq_dates ) %>%
+      left_join( 
+        data_frame( value = values , 
+                    period = d_ou_de$period %>% as.yearmon(. , "%Y%m")
+                    ) ,
+        by = 'period'
+                 )
+    
+    ts_ou_de = ts( dataset.all.dates$value , 
+                   start = dataset.all.dates$period[1] , 
+                   end = dataset.all.dates$period[ nrow( dataset.all.dates ) ] ,
                    frequency = 12 
     )
     
@@ -202,7 +214,17 @@ ts.ou.de = function(data , ous , de , start_year = NA ){
     return( ts_ou_de )
 }
 
-
+ts_to_df = function( ts ){
+  
+  # starts with time-series object, return data frame with
+  # - date , and 
+  # - Y 
+  ts %>%
+  data.frame(
+    date = as.Date( time( . ) ), 
+    Y = as.matrix( . )
+  )
+}
 
 # Decompose functions ####
 decompose.stl = function( df , year = NULL ,
