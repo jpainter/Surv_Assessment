@@ -897,7 +897,7 @@ if ( !exists( "facilities" ) ){
 
 ### Number facilities reporting last year.  
 
-```{r facilities_reporting_last_year, eval = FALSE }
+```{r facilities_reporting_last_year }
 
 open_ou =     md$organisationUnits %>% 
     select( id, closedDate) %>%
@@ -1308,7 +1308,7 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
 ### Selected Elements by Topic
 
-```{r}
+```{r, eval= FALSE}
 
 sheets = excel_sheets( de.review.xlsx ) 
 
@@ -1322,7 +1322,7 @@ de.include =
                      topic = factor( Search, levels = sheets ,
                                      labels = topics ) 
                      ) %>%
-           filter( !is.na( Include ) ) %>%
+           filter( !is.na( Include )  ) %>%
            select( Search, topic , dataElement.id , dataElement ) 
 ) 
 
@@ -1349,7 +1349,7 @@ de.include = de.include %>%
      }
  
  
- if ( file.exists( de.include.xlsx) | params$create_new  ) {
+ if ( !file.exists( de.include.xlsx) | params$create_new  ) {
    
    try( openxlsx::write.xlsx( de.include , de.include.xlsx ) )
    
@@ -1406,9 +1406,8 @@ data_element_table %>% rmarkdown::paged_table(.)
 
 ```{r data_totals}
 
-    data.totals.file = paste0( dataset.directory ,
-                     dhis_instance, 
-                     "_totals.rds" )
+    data.totals.file = paste0( origin.folder , "/" , 
+                               dhis_instance, "_totals.rds" )
 
     nde = nrow( de.include )
     
@@ -1424,9 +1423,9 @@ data_element_table %>% rmarkdown::paged_table(.)
             
             levels = levels.vector , 
             de.vars = de.include ,
+            folder = dataset.directory ,
             file = data.totals.file ,
-            details = FALSE , 
-            submissions =  FALSE )
+            details = FALSE  )
         
         print( paste( "TOTAL:", 
                        scales::comma( nrow( data_totals ) ) , 
@@ -1466,7 +1465,7 @@ data_element_table %>% rmarkdown::paged_table(.)
 ```{r data_details}
 ## DataElements : details 
 
-    data.details.file = paste0( dataset.directory ,
+    data.details.file = paste0( origin.folder , "/" ,
                                 dhis_instance, 
                                 "_details.rds" )
 
@@ -1476,9 +1475,9 @@ data_element_table %>% rmarkdown::paged_table(.)
             
             levels = levels.vector , 
             de.vars = de.include ,
+            folder = dataset.directory ,
             file = data.details.file ,
-            details = TRUE , 
-            submissions =  FALSE 
+            details = TRUE
             
             )
         

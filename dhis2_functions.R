@@ -673,22 +673,17 @@ ous.translated = function(  .meta = NULL,
          years = FiveYrsPrevious:this.year
      }
      
-     period = character()
+     # get current month.  List months from Jan/FiveYearsPrevious 
+     # through month before current month
+     library( zoo )
+     startMonth = as.yearmon(FiveYrsPrevious )
+     endMonth = Sys.yearmon()
+     months = seq( startMonth, endMonth , 1/12 ) %>% format(., "%Y%m")
      
-     for ( year in years ){
-         for (month in seq_along(months)){
-             this_period = paste0( ";" , 
-                                   year , 
-                                   ifelse( month < 10 , paste0("0", month) , month )
-             )
-             period =  c(period, this_period )
-         }
-     }
+    # remove current month ;
+     months = months[ 1:( length(months) - 1)]
      
-     # remove first ;
-     period =  paste( period, collapse = "")
-     period = substring( period, 2, nchar(period))
-     
+     period = paste( months, collapse = ";" )
      return( period )
  }
  
@@ -697,10 +692,10 @@ ous.translated = function(  .meta = NULL,
  api_data = function( periods = NA , 
                       levels = NA , 
                       de.vars = NA , # a data.frame like _key_data_elements.rds
+                      folder = "" ,
                       file = "" ,
                       dsde = NULL , 
-                      details = FALSE , 
-                      submissions =  FALSE 
+                      details = FALSE 
  ){
      
      if ( is.null( file ) ){
@@ -710,10 +705,27 @@ ous.translated = function(  .meta = NULL,
          
      }
      
-
-     if ( file.exists( file ) ) existing.data = read_rds( file ) %>% as.tibble()
+     file. = paste0( folder , file )
      
+     instance = strsplit( file , "_" )[[1]][1]
+     
+     # folder to store monthly data
+     if ( details ){ 
+         folder.monthly = paste0( folder , "dataElement_details" )
+     } else {
+         folder.monthly = paste0( folder , "dataElement_totals" )
+     }
+     
+     # monthly file name 
+     if ( !dir.exists( folder.monthly ) ) dir.create( folder.monthly )
+     
+     if ( details ){ 
+         file.monthly = paste0( folder.monthly, "/", instance , "_details_" )
+     } else {
+         file.monthly = paste0( folder.monthly, "/" , instance , "_totals_" )
+     }
 
+      # periods to download
      if ( all( is.na( periods )  ) ){
          
          periods = strsplit( date_code(), ";" , fixed = TRUE )[[1]]
@@ -721,12 +733,12 @@ ous.translated = function(  .meta = NULL,
      } 
  
      ##### Set list of elements to ask for
-     # if not vars selected, get list from last data totals
+     # For details, if vars not selected, get list from last data totals
      
-     if ( nrow( de.vars ) == 0 ){
+     if ( details & nrow( de.vars ) == 0 ){
          
          # if it exists, get list of data elements from totals file
-          totals_file = gsub( 'details' , 'totals' , file )
+          totals_file = gsub( 'details' , 'totals' , file. )
          
           if ( file.exists( totals_file ) ){
              
@@ -742,36 +754,13 @@ ous.translated = function(  .meta = NULL,
          dataElements = de.vars
      }
      
-     # dataElement.ids =  de.vars$dataElement.id
-     # dataElement.names = de.vars$dataElement
-       
-     
-     if ( submissions ){ # substitute dataSet associated with dataElement
-         
-         stopifnot( !is.null( dsde) )
-         
-       
-         # get datasets associated with data_totals dataElements
-         dataElements =  dsde  %>% 
-             filter( dataElement.id %in% de.vars$id ) %>%
-             count( dataSet , dataSet.id ) %>% 
-             # convert ids to names
-             rename( id = dataSet.id ) %>%
-             left_join( md$dataSets %>% select( name, id ), 
-                        by = "id" 
-             ) %>%
-             
-             # pretend datasets are dataelements
-             rename( dataElement.id = id ,  
-                     dataElement = name
-                     ) 
-     }
-     
+   
+     # login
      stopifnot( origin.login()  )
      
      print( baseurl )
      
-     ##### cycle through each period, each data element...
+     ##### cycle through each period, each data element
      
      ndei = nrow( dataElements ) * length( periods )
      pb <- progress_estimated( ndei )
@@ -784,14 +773,15 @@ ous.translated = function(  .meta = NULL,
      
      for ( period in seq_along( periods ) ){
        
-         period_data_file = paste0(  file , "_", periods[period] ) 
+         # store monthly data in separate files so do not have to redownload
+         period_data_file = paste0(  file.monthly , periods[period] , ".rds" ) 
          
          
          if ( file.exists( period_data_file ) ) existing.data = read_rds( period_data_file ) %>% as.tibble()
 
          data.de = list()
          
-         # todo: allocate size of list :
+         # allocate size of list :
          data.de = vector(mode = "list", 
                           length = length( dataElements$dataElement.id )
                           )
@@ -801,6 +791,8 @@ ous.translated = function(  .meta = NULL,
              update_progress(pb) 
     
              # if dataElement in same period already exists...
+             
+             # Check existing monthly data file
              if ( exists( "existing.data" ) ){
                  
                  in.period = existing.data$period %in% periods[ period ] 
@@ -825,20 +817,9 @@ ous.translated = function(  .meta = NULL,
              }
              
              
-             de.ids = dataElements$dataElement.id[ element ]
+            de.ids = dataElements$dataElement.id[ element ]
              
-            if ( submissions ){
-                 
-                 reports = c( 'ACTUAL_REPORTS', 'ACTUAL_REPORTS_ON_TIME', 'EXPECTED_REPORTS' )
-                 # get ids
-                 de.ids = dataElements$dataElement.id[ element ]
-                 
-                 # concatenate with report types
-                 de.ids = paste0( de.ids, ".", reports , collapse = ';')
-             }
-             
-             
-             if ( details ){
+            if ( details ){
                  
                  de.index = which( md$dataElements$id %in% dataElements$dataElement.id[ element ] )
                  
@@ -880,11 +861,7 @@ ous.translated = function(  .meta = NULL,
                
                
              }
- 
-                 
-            
-
-             
+        
              data.level = list()
              
              for ( level in seq_along( levels ) ){
@@ -928,6 +905,15 @@ ous.translated = function(  .meta = NULL,
                      print( paste( nrow(fetch), "records." ) )
                  
                      } else {
+                     if ( is.null( fetch ) ){ 
+                         
+                         data.level[[ level ]] = tibble( 
+                             dataElement = de.ids ,
+                             period = periods[ period ],
+                             orgUnit = NA ,
+                             value = NA, 
+                             level =  levels[level] )
+                         }
                          
                      cat( "no records \n" )
                  }
