@@ -13,7 +13,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Burkina Faso
+  dhis_instance: Malawi
   data_directory:  datasets
   output_directory: 
   output_format: html_document
@@ -30,7 +30,7 @@ This script creates the review documents by first downloading and cleaning some 
 ```{r package_list, message=FALSE, include= FALSE, warning= FALSE }
 
 # list of required packages
-    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "geojsonR", "wellknown" , "geojsonio" , "sp" , "rmapshaper" , "rgeos" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "tsibble", "seasonal", "forecast", "stlplus",  "gridExtra", "futile.logger", "Hmisc", "pander" , "stringi", "rlang" , "htmltools" , "tidyselect" , "broom" , "ggthemes" , "readxl", "knitrProgressBar" , "tidyverse" )
+    package.list = c("tidyverse" ,"rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "geojsonR", "wellknown" , "geojsonio" , "sp" , "rmapshaper" , "rgeos" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "tsibble", "seasonal", "forecast", "stlplus",  "gridExtra", "futile.logger", "Hmisc", "pander" , "stringi", "rlang" , "htmltools" , "tidyselect" , "broom" , "ggthemes" , "readxl", "knitrProgressBar" , 'osmdata', 'sf' ,  "geojsonsf" , 'tmap', 'formattable' )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -52,12 +52,16 @@ This script creates the review documents by first downloading and cleaning some 
 # Clear memory
   objs.not.params = ls()[ !grepl( "params" , ls() ) ]
   rm(  list= objs.not.params )
-    
-# load accessory functions
-source('dhis2_functions.R')
+
 
 ```
 
+
+```{r accessory_functions}
+    
+# load accessory functions
+source('dhis2_functions.R')
+```
 
 ```{r knitr_setup, include = FALSE }
 
@@ -144,6 +148,118 @@ origin.login = function(){
 # test login 
  assert_that( origin.login() )
   
+```
+
+## Base map of number of org units by admin level
+
+TODO: convert this to a function
+
+```{r OSM_base_map, eval=FALSE }
+
+
+base_map_file =  paste0( dhis_instance, "_base_map.rda") 
+
+if ( !file.exists( base_map_file ) ){  # stop 
+  
+  my_world_map <- map_data('world')
+  
+  # Border countries
+  # my_world_map <- my_world_map[my_world_map$region %in% c("Malawi","Zimbabwe", "Mozambique", "Zambia", "Tanzania"),]
+  
+  # Target country
+  my_country_map <- my_world_map[my_world_map$region %in% 
+                                   params$dhis_instance, ]
+  
+  projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+  
+  # convert data.frame to sf points, then to polygon
+  my_country_map.sf = st_as_sf( my_country_map   ,                       
+             coords = c("long", "lat"),
+             crs = projcrs) %>% 
+    group_by( group ) %>%
+    summarise( do_union=FALSE ) %>%
+    st_cast("POLYGON"  ) %>%
+    ungroup()
+  
+  
+  # bounding box 
+  bbox <- st_bbox( my_country_map.sf) 
+  
+  # Add water features
+  osm_lakes.sf <-
+       opq( bbox = bbox  ) %>%
+       add_osm_feature(key = 'water', value = 'lake') %>%
+       osmdata_sf()  %>%
+    .$osm_multipolygons 
+  
+  
+    # simplify to make faster
+    osm_lakes.sf =   rmapshaper::ms_simplify(
+      input = as( osm_lakes.sf , 'Spatial')
+      ) %>%
+      st_as_sf()
+  
+  osm_rivers.sf <-
+       opq( bbox = bbox ) %>%
+       add_osm_feature(key = 'waterway', value = 'river') %>%
+       osmdata_sf()
+  
+  osm_rivers.sf <- osm_rivers.sf$osm_lines
+  
+  
+  # base 
+  
+  ### National Park 
+  osm_parks.sf <- 
+       opq(bbox = bbox ) %>%
+       add_osm_feature(key = 'natural', value = 'trunk') %>%
+       osmdata_sf()  %>% .$osm_lines 
+  
+  
+  ## add Roads  ####
+  
+  osm_roads_primary.sf <- 
+       opq(bbox = bbox ) %>%
+       add_osm_feature(key = 'highway', value = 'trunk') %>%
+       osmdata_sf()   %>% 
+    .$osm_lines 
+  
+  osm_roads_secondary.sf <-
+       opq(bbox = bbox ) %>%
+       add_osm_feature(key = 'highway', value = 'secondary') %>%
+       osmdata_sf()  %>% .$osm_lines
+  
+  # osm_roads_tertiary.sf <- 
+  #      opq(bbox =  bbox ) %>%
+  #      add_osm_feature(key = 'highway', value = 'tertiary') %>%
+  #      osmdata_sf()  %>% .$osm_lines 
+  
+  
+  # Base map ggplot-SF
+  base = ggplot() +
+       # geom_raster(data = hill.df, aes(lon, lat, fill = hill), alpha = .45) +
+       # scale_fill_gradientn(colours = grey.colors(100)) +
+       geom_sf(data = osm_lakes.sf , fill = '#9ecae1', colour = NA) +
+       # geom_sf(data = osm_rivers.sf, colour = '#9ecae1', size = 0.05) +
+       # geom_sf(data = osm_roads_primary.sf, colour = 'red', size = 0.1, alpha = .1 ) +
+       # geom_sf(data = osm_roads_secondary.sf, colour = 'brown', size = 0.05, alpha = .1) +
+       # geom_sf(data = osm_roads_tertiary.sf, colour = '#636363', size = 0.02) +
+       # geom_sf(data = my_bbox_buff_2500.sf, fill = NA) +
+       geom_sf(data = my_country_map.sf, fill = NA,
+               colour = 'black') +
+       coord_sf( xlim = c( bbox['xmin'], bbox['xmax']),
+                ylim = c(bbox['ymin'], bbox['ymax'])) +
+       theme_bw()
+  
+  # base
+  
+  save( base, file = base_map_file )
+  
+} else {
+    
+  load(file = base_map_file )
+  }
+
 ```
 
 
@@ -263,8 +379,9 @@ origin.login = function(){
 
 ### 2. Test facility geocodes to see if they are in their respective administrative areas (~2-5 min)
 
+<!-- --> Deprecated  -->
 
-```{r admins. }
+```{r admins. , eval = FALSE }
 
 # if no closdeDate, then set to NA
 if ( ! 'closedDate' %in% names( md$organisationUnits ) ){
@@ -274,31 +391,37 @@ if ( ! 'closedDate' %in% names( md$organisationUnits ) ){
 
 # orgUnits that are polygons (likely admin), and open
 
-admins = md$organisationUnits %>% 
+admins = md$organisationUnits %>%
     select( id, name, coordinates, openingDate, closedDate, path  ) %>%
-    as_tibble %>% 
-    mutate( 
-        feature_type = map_chr( coordinates, ~feature_type(.x) ) 
+    as_tibble %>%
+    mutate(
+        feature_type = map_chr( coordinates, ~feature_type(.x) )
         ) %>%
     filter( feature_type %in% 'Polygon'  ) %>%
     # filter( !is.na(coordinates), is.na( closedDate ) )  %>%
     mutate(
-        
+
         level = map_int( path,
-                         ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
+                         ~length( gregexpr("/", .x, perl = TRUE)[[1]])
             ) ,
-        
+
         Year = year( ymd_hms( openingDate ) )  %>% ifelse( .<2008 , 2014 , . ) ,
-        
+
         coordinates = fix_coordinate_brackets( coordinates ) ,
-        
-        str_js = paste( 
+
+        str_js = paste(
             '{ "type": "MultiPolygon", "coordinates": ' ,
-            coordinates , ' }' 
+            coordinates , ' }'
             )
-        
+
     ) %>%
     as_tibble()
+
+## convert geo_json into SF and add other columns (sometimes throws warnings)
+
+  admins.sf = geojson_sf( admins$str_js  ) %>% bind_cols(
+    admins %>% select( -str_js, -coordinates )
+    )
 
 
     char_js. = map( admins$str_js, ~ FROM_GeoJson( .x ) ) 
@@ -311,6 +434,7 @@ admins = md$organisationUnits %>%
     
     pgons = map( 1:length(polys),  
                  ~ Polygons( polys[[.x]]  , as.character(.x)  ) )
+    
     spoly = SpatialPolygons( pgons )
     proj4string( spoly ) = CRS("+proj=longlat +datum=WGS84")
 
@@ -339,31 +463,81 @@ admins = md$organisationUnits %>%
  
 ```
 
+## Points and Polygons as SF
 
-```{r cleangeoAdmins. }
+```{r}
+ous.geos = ous_from_metatdata( md , simplify = TRUE ) %>% filter( !is.na( coordinates ) ) 
 
-# fixing holes and other issues.  added this simplify step to accomodate polygons with some geo-integrity problems (Nigeria)
+## convert geo_json into SF and add other columns (sometimes throws warnings)
 
-admins = readRDS( admins_file )
+ous.sf = geojson_sf( ous.geos$str_js  ) %>% 
+    bind_cols(
+        ous.geos %>% select( -str_js, -coordinates )
+        )
 
-admins$polygons = rmapshaper::ms_simplify( admins$polygons ,
-                                           keep = .1 ,
-                                           drop_null_geometries = FALSE ,
-                                           keep_shapes = TRUE )  
+ # save 
+  ous_file =  paste0( dataset.directory , dhis_instance, "_ous.rds" ) 
+  
+  if ( file.exists( ous_file ) | params$create_new )  file.rename( ous_file , 
+                                                                   paste0( ous_file ,
+                                                                           format(Sys.time(),
+                                                                                  "%b%d%Y") ) 
+                                                                   )
+ if ( !file.exists( ous_file ) ) saveRDS( ous.sf , ous_file ) 
+ 
+ if ( file.exists( ous_file ) ) ous.sf = readRDS( ous_file )
+       
+admins = ous.sf %>% filter( feature %in% 'Polygon'  )
 
-# if this step fails--because it results in too little detail, increase the paramater keep = .50 or higher.  default is 0.05 
+hf = ous.sf %>% filter( feature %in% 'Point'  )
 
-# NB: todo:  test the polygons to see if they have too much detail (Malawi), compared with countries with very little (Nigeria)
+# Map of regions 
+admins %>%
+    filter( level %in% 2 ) %>%
+    rename( Region = orgUnit.name ) %>%
+    tm_shape( . ) + 
+    tm_polygons( "Region" ) + 
+    # tm_dots( "HF" ) +
+    tm_layout( frame = FALSE , legend.outside = TRUE )
 
-# plot( admins$polygons )
+# Map of districts 
+admins %>%
+    filter( level %in% 3 ) %>%
+    rename( District = orgUnit.name ) %>%
+    tm_shape( . ) + 
+    tm_polygons( "District" ) + 
+    tm_layout( frame = FALSE , legend.outside = TRUE ) 
+    
 
-# TODO: Check that admin polygons are in the bounding box for the country
-# If not, try reversing lat/long or changing sign
+# map of HF -- not that this all facilities, regardless of whether it supplies OPD data
+hf %>%
+    # filter( level %in% 3 ) %>%
+    mutate( level = factor( level ) ) %>%
+    rename( HF = orgUnit.name ) %>%
+    tm_shape( . ) + 
+    # tm_
+    # tm_dots( "level" ) + 
+    tm_dots( 'HF' ) + 
+    tm_layout( frame = FALSE ) + 
+    tm_legend(show=FALSE)
+    
 
+# Map of regions with HFC
+admins %>%
+    filter( level %in% 2 ) %>%
+    rename( Region = orgUnit.name ) %>%
+    tm_shape( . ) + 
+    tm_polygons( "Region" ) + 
+    # tm_dots( "HF" ) +
+    tm_layout( frame = FALSE  , legend.outside = TRUE ) +
+    tm_shape( hf %>% mutate( level = factor( level ) )  ) +  
+    tm_dots( "level" , alpha = .2, col = 'black' , size = .01, 
+             border.alpha = .2, border.col = 'black' )
 ```
 
+ <!-- deprecated -->
 
-```{r clinics.  }
+```{r clinics. , eval=FALSE }
 
 # orgUnits that are points (likely HF), and open
 clinics = md$organisationUnits %>% 
@@ -415,39 +589,20 @@ Step: find orgUnit with polygon data that it belongs to. Separate path and trans
  # if ( !exists( "clinics" ) | params$create_new ) clinics = readRDS( clinics_file )
 
 # Long form or clinics dataframe with row for each clinic-parent
-clinics. = clinics %>%
+clinics. = hf %>%
     mutate( 
-        paths = map( path, ~str_split( .x,  "\\/"  ) ) 
-    ) %>% unnest( paths ) %>% unnest( paths ) %>%
+        paths = purrr::map( path, ~str_split( .x,  "/"  ) ) 
+    ) %>% 
+    unnest( paths ) %>% unnest( paths ) %>%
     rename( parent.id = paths ) %>%
-    group_by( id ) %>%
+    group_by( orgUnit ) %>%
     mutate(
         parent.level = row_number() - 1
     ) %>% 
     ungroup() %>% 
   
     filter( parent.level == level - 1 ) %>%
-    
-    # join with admins
-    left_join( admins %>% 
-                    select( id, name ) %>% 
-                    rename( admin.name = name, admin.id = id ) , 
-                by = c( 'parent.id' = 'admin.id' ) 
-                ) %>%
-  
-    # join with clinics
-    left_join( clinics %>% 
-                    select( id, name ) %>% 
-                    rename( parent.name = name) , 
-                by = c( 'parent.id' = 'id' ) 
-                ) 
-
-# %>%
-#     
-#     filter( !is.na( admin.name ) )
-
-# clinics.$polygon = admins$polygons[ match( clinics.$parent.id , admins$id )]
-
+    as_tibble()
 
 
 ```
@@ -455,7 +610,7 @@ clinics. = clinics %>%
 
 - Check if facility with coordinates is in parent 
 
-TODO:  This only works for level one below the admin units.  Does not work for CHW assigned to facilities.  Update code to check if CHW are in the admin area of the facility they are associated with.  
+<!-- TODO:  This only works for level one below the admin units.  Does not work for CHW assigned to facilities.  Update code to check if CHW are in the admin area of the facility they are associated with.   -->
 
 ```{r facilityInParent. }
 
@@ -483,27 +638,31 @@ keep_the_existing_one = FALSE # so, dont download a new one.
          
  } else {
      
-     c = clinics. 
- 
-     nc = nrow(c)
+     nc = nrow(clinics.)
      
      pb <- progress_estimated( nc )
      
      # test if facility is in lowest parent level
-     c= c %>% 
-         group_by( id ) %>%
+     c = clinics. %>% 
+         group_by( orgUnit ) %>%
          # filter( parent.level == max( parent.level ) ) %>%
          ungroup() %>%
          mutate(
-             in.parent = map2_lgl( id, parent.id , is.in.parent, .pb = pb ) ,
+             in.parent = map2_lgl( orgUnit, parent.id , 
+                                   ~is.in.parent(.x, .y, 
+                                                 .pb = pb, clinics = clinics. ,
+                                                 buffer_arc_seconds = 300 ) 
+                                   ) ,
              
-             has.coordinates = ifelse( is.na( lat ) | is.na( long ), FALSE, TRUE )
+             has.coordinates = ifelse( is.na( geometry ) | is.na( geometry ), 
+                                       FALSE, TRUE ) ,
+             
+             has.parent = map_lgl( parent.id , ~.x %in% ous.sf$orgUnit )
          )
  }
  
  
- count(c, has.coordinates , level , in.parent , parent.level ) %>% 
-     spread( parent.level, n )
+ count(c, level ,  has.coordinates , has.parent,  in.parent  ) 
  
  
 ```
@@ -512,27 +671,27 @@ keep_the_existing_one = FALSE # so, dont download a new one.
 
 ```{r c.fix. }
  
- c.fix = c %>%
-     filter( has.coordinates  %in% TRUE, in.parent %in% FALSE ) 
+ c.to.fix = c %>%
+     filter( has.coordinates  %in% TRUE,  has.parent %in% TRUE , in.parent %in% FALSE ) 
 
- ncfix = nrow(c.fix)
- in.parent.fix = vector("list", length = ncfix ) 
+ ncfix = nrow(c.to.fix)
+ in.parent.fix = vector( "list", length = ncfix ) 
  p <- progress_estimated(ncfix )
  
  for ( i in 1:ncfix ){
      
         p$pause(0)$tick()$print()
      
-        in.parent.fix[[i]] = map2_lgl( c.fix$id[i], 
-                                   c.fix$parent.id[i] , 
-                                   ~is.in.parent( .x, .y  , fix = TRUE )
+        in.parent.fix[[i]] = map2_lgl( c.to.fix$id[i], 
+                                   c.to.fix$parent.id[i] , 
+                                   ~is.in.parent( .x, .y  , fix = TRUE ,
+                                                  .pb = pb, clinics = clinics. )
         )
  }        
  
- c.fix$in.parent.fix = in.parent.fix %>% unlist   
+ c.to.fix$in.parent.fix = in.parent.fix %>% unlist   
 
-
- count(c.fix, level ,  in.parent.fix , parent.level ) %>% spread( parent.level, n )
+ count(c.to.fix, level ,  in.parent.fix )
 
  # Update c with c.fix
  c. = left_join( c, c.fix %>% select( id, parent.level, in.parent.fix ), 
@@ -546,7 +705,6 @@ keep_the_existing_one = FALSE # so, dont download a new one.
      ) %>%
      select( -long., -lat. )
  
-
 ```
 
 - If coordinates are missing, or the clinic is not in its parent, then impute a location.
@@ -613,7 +771,7 @@ if ( !exists( "facilities" ) ){
  
 ```
 
-## Metadata summary (need to update)
+## Metadata summary (need to update)`
 
 ```{r Metadata_Review., eval = FALSE }
     
@@ -656,139 +814,20 @@ if ( !exists( "facilities" ) ){
 
 ```
 
-## Data elements 
-
-
-### 3. Query DHIS2 to determine frequency that selected data elements were submitted (~10-90 min)
-
-
-```{r de.}
-
-    de = md$dataElements
+```{r levels.}
+  # levels
+  levels = character()
     
-    # Convert category combo from df to list (ends up with id as character)
-    de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
+  for ( i in seq_along( md$organisationUnitLevels$id) ){
     
-    # dataElement vars
-    # names( de )
-
-```
-
-```{r search_data_elements. }
-    
-    mal = quo( grepl( '\\<malaria\\>|palu' , de$name , ignore.case = TRUE ) )
-    TB = quo( grepl( '\\<tb\\>' , de$name , ignore.case = TRUE ) )
-    HIV = quo( grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) )
-    imm = quo( grepl( 'imm' , de$name , ignore.case = TRUE ) )
-    conf = quo( grepl( 'conf' , de$name , ignore.case = TRUE ) )
-    susp = quo( grepl( 'susp' , de$name , ignore.case = TRUE ) )
-    opd = quo( grepl( '\\<opd\\>' , de$name , ignore.case = TRUE ) )
-    ipd = quo( grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )  )
-    patients = quo( grepl( '\\<patient\\>' , de$name , ignore.case = TRUE ) &
-         !grepl( '\\<hiv\\>|\\<tb\\>' , de$name , ignore.case = TRUE )
-         )
-    fever = quo( grepl( '\\<fever\\>' , de$name , ignore.case = TRUE )  &
-         !grepl( '\\<yellow\\>|\\<typhoid\\>' , de$name , ignore.case = TRUE )
-         )
-    attendance = quo( grepl( '\\<attendance\\>' , de$name , ignore.case = TRUE ) )
-    anc = quo( grepl( '\\<anc\\>|\\<CPN\\>|\\<IPT\\>|\\<TPI\\>' , de$name , ignore.case = TRUE ) )
-    deaths = quo( grepl( 'death' , de$name , ignore.case = TRUE ) )
-    pop = quo( grepl( 'pop' , de$name , ignore.case = TRUE ) )
-    stock = quo( grepl( 'stock|rupture|\\<out\\>' , de$name , ignore.case = TRUE ) )
-    malaria_stock = quo( grepl( 'stock|rupture' , de$name , ignore.case = TRUE )  &
-         grepl( '\\<RDT\\>|\\<TDR\\>|\\<IPT\\>|\\<ACT\\>|\\<ASAQ\\>|\\<AL\\>|\\<APT\\>|<\\PTI\\>|\\<SP\\>|\\<fansidar\\>' , de$name , ignore.case = TRUE ) )
-    
-# More complicated search for malaria terms
-    malaria_terms_whole_words = 'malaria palu PF plasmodium RDT TDR IPT ACT ASAQ AL APT TPI SP fansidar slide micro fever fievre ANC CPN' %>%
-        stri_extract_all_words %>% unlist %>%
-        
-        # add '\\<' so that only whole word is found
-        sprintf( "\\<%s\\>", . )
-    
-    malaria_terms_part_words = NULL  # 'conf susp' %>% stri_extract_all_words %>% unlist
-    
-    malaria_search_terms = paste(  
-        c( malaria_terms_whole_words , 
-           malaria_terms_part_words ) ,
-        collapse = '|'
-    )
-    
-    malaria_items = quo( grepl( malaria_search_terms, de$name , 
-                      ignore.case = TRUE ) 
-                      &
-         !grepl( '\\<hiv\\>|\\<tb\\>|MTCT|\\<yellow fever\\>|\\<typhoid fever\\>' , de$name , ignore.case = TRUE )
-    )
-         
-# Organise all the searches as a list
-    searches = list( mal, malaria_items, TB, HIV, imm, conf, susp, opd, ipd, patients, fever, attendance, anc, deaths, pop , stock, malaria_stock )
-    
-    names.searches  = c( 'mal', 'malaria_items', 'TB', 'HIV', 'imm', 'conf', 'susp', 'opd', 'ipd', 'patients', 'fever', 'attendance', 'anc', 'deaths', 'pop', 'stock', 'malaria_stock' )
-    
-    
-    names( searches ) = names.searches 
-    
-```
-
-### Request number of reports during last 12 months for each **data element**
-
-```{r dataElementReporting }
-
-  all.de = Reduce(  "|" , map( searches, eval_tidy  ) )
-  # sum( all.de )
-
-  display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
-                                 'categoryCombo', 'id' )
-     
-  de.mal = de[  eval_tidy( malaria_items) , display.vars ]
-
-  reported_data_file = paste0( dataset.directory ,
-                           dhis_instance, 
-                           "_reported.rds" ) 
-  
-  
-  new.dataElements = NULL
-
-  
-  
-  if ( file.exists( reported_data_file)  ){
-    
-     d.reported =  readRDS( reported_data_file )
-     
-     d.reported.dataElements =  count( d.reported , dataElement ) %>% .$dataElement 
-     
-  } else {
+        levels =  c(levels, paste0("LEVEL-", i) )
+      }
       
-      d.reported.dataElements = NULL 
-  }
+  levels = paste( levels, collapse = ";")
   
-  
-  new.dataElements =  setdiff( de.mal$id[ order( de.mal$id )] ,  d.reported.dataElements )
-
-  nde = length( new.dataElements )
-  
-  # Get number reported for all elements
-  if ( nde > 0 ){
-        
-        d.reported = api_last12months_national_data( 
-            
-            de.include = de[ all.de, ] ,
-            file = reported_data_file ,
-            details = TRUE 
-            
-            )
-        
-
-        saveRDS( d.reported , reported_data_file )
-        
-  } 
-
-  
+  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
 
 ```
-
-
-### Request Data Completeness (form submissions) : number of  **data form** reported during last 12 months ('DHIS2 reporting')
-
 
 
 - Create table, 'dsde',  to lookup form associated with eath data element 
@@ -820,21 +859,177 @@ if ( !exists( "facilities" ) ){
 ```
 
 
-```{r levels.}
-  # levels
-  levels = character()
+## Data elements 
+
+
+### 3. Query DHIS2 to determine frequency that selected data elements were submitted (~10-90 min)
+
+
+```{r de.}
+
+    de = md$dataElements
     
-  for ( i in seq_along( md$organisationUnitLevels$id) ){
+    # Convert category combo from df to list (ends up with id as character)
+    de[, 'categoryCombo' ] = as.list( de[, 'categoryCombo' ] )
     
-        levels =  c(levels, paste0("LEVEL-", i) )
-      }
-      
-  levels = paste( levels, collapse = ";")
-  
-  levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+    # dataElement vars
+    # names( de )
+    
+    de.grp = md$dataElementGroups
 
 ```
 
+```{r search_data_elements. }
+    
+    mal.grp.de = de.grp[ 
+                     grepl( '\\<malaria\\>|palu', 
+                            de.grp$name , ignore.case = TRUE) , 
+                     "dataElements" 
+                     ] %>%
+      unlist(.) %>% unname
+    
+
+    mal = quo( 
+      grepl( '\\<malaria\\>|palu' , de$name , ignore.case = TRUE ) |
+        de$name %in% mal.grp.de 
+      )
+    
+    TB = quo( grepl( '\\<tb\\>' , de$name , ignore.case = TRUE ) )
+    HIV = quo( grepl( '\\<hiv\\>' , de$name , ignore.case = TRUE ) )
+    imm = quo( grepl( 'imm' , de$name , ignore.case = TRUE ) )
+    conf = quo( grepl( 'conf' , de$name , ignore.case = TRUE ) )
+    susp = quo( grepl( 'susp' , de$name , ignore.case = TRUE ) )
+    presumed = quo( grepl( 'sume' , de$name , ignore.case = TRUE ) )
+    opd = quo( grepl( '\\<opd\\>' , de$name , ignore.case = TRUE ) )
+    ipd = quo( grepl( '\\<ipd\\>' , de$name , ignore.case = TRUE )  )
+    patients = quo( grepl( '\\<patient\\>|consult' , de$name , ignore.case = TRUE ) &
+         !grepl( '\\<hiv\\>|\\<tb\\>' , de$name , ignore.case = TRUE )
+         )
+    fever = quo( grepl( '\\<fever\\>' , de$name , ignore.case = TRUE )  &
+         !grepl( '\\<yellow\\>|\\<typhoid\\>' , de$name , ignore.case = TRUE )
+         )
+    attendance = quo( grepl( '\\<attendance\\|consult' , de$name , ignore.case = TRUE ) )
+    anc = quo( grepl( '\\<anc\\>|\\<CPN\\>|\\<IPT\\>|\\<TPI\\>' , de$name , ignore.case = TRUE ) )
+    
+    chw = quo( grepl( '\\<chw\\>|\\<communit\\>|\\<iccm\\>' , de$name , ignore.case = TRUE ) )
+    
+    deaths = quo( grepl( 'death' , de$name , ignore.case = TRUE ) )
+    pop = quo( grepl( 'pop|census|recensement' , de$name , ignore.case = TRUE ) )
+    
+    stock.grp.de = de.grp[ 
+                     grepl( 'stock|rupture', de.grp$name , ignore.case = TRUE) , 
+                     "dataElements" 
+                     ] %>%
+      unlist(.) %>% unname
+    
+    
+    stock = quo( 
+      grepl( 'stock|rupture|\\<out\\|\\<sulf\\|\\<arte\\|\\<lufen\\>' ,
+             de$name , ignore.case = TRUE ) | de$id %in% stock.grp.de
+    )
+    
+    malaria_stock = quo( 
+      ( grepl( 'stock|rupture' , de$name , ignore.case = TRUE ) |
+          de$id %in% stock.grp.de )
+      &
+         grepl( '\\<RDT\\>|\\<rapid\\>|\\<TDR\\>|\\<IPT\\>|\\<ACT\\>|\\<ASAQ\\>|\\<AL\\>|\\<APT\\>|art|lum|pyr|<\\PTI\\>|\\<SP\\>|\\<fansidar\\>|\\<itn\\>|\\<net\\>' , 
+                de$name , ignore.case = TRUE ) 
+      )
+    
+# More complicated search for malaria terms
+    malaria_terms_whole_words = 'malaria palu PF plasmodium RDT TDR IPT ACT ASAQ AL APT TPI SP fansidar slide micro fever fievre ANC CPN' %>%
+        stri_extract_all_words %>% unlist %>%
+        
+        # add '\\<' so that only whole word is found
+        sprintf( "\\<%s\\>", . )
+    
+    malaria_terms_part_words = NULL  # 'conf susp' %>% stri_extract_all_words %>% unlist
+    
+    malaria_search_terms = paste(  
+        c( malaria_terms_whole_words , 
+           malaria_terms_part_words ) ,
+        collapse = '|'
+    )
+    
+    malaria_items = quo( grepl( malaria_search_terms, de$name , 
+                      ignore.case = TRUE ) 
+                      &
+         !grepl( '\\<hiv\\>|\\<tb\\>|MTCT|\\<yellow fever\\>|\\<typhoid fever\\>' , de$name , ignore.case = TRUE )
+    )
+         
+# Organise all the searches as a list
+    searches = list( mal, malaria_items, patients, fever, attendance, anc, chw, deaths, pop , malaria_stock, TB, HIV, imm, conf, susp, presumed, opd, ipd, stock )
+    
+    names.searches  = c( 'mal', 'malaria_items',  'patients', 'fever', 'attendance', 'anc', 'chw', 'deaths', 'pop', 'malaria_stock' , 'TB', 'HIV', 'imm', 'conf', 'susp', 'presumed', 'opd', 'ipd',  'stock')
+    
+    
+    names( searches ) = names.searches 
+    
+```
+
+### Request number of reports during last 12 months for each **data element**
+
+```{r dataElementReporting }
+
+  all.de = Reduce(  "|" , map( searches, ~eval_tidy(.x)  ) )
+  # sum( all.de )
+
+  display.vars = c('name', 'zeroIsSignificant', 'lastUpdated',
+                                 'categoryCombo', 'id' )
+     
+  de.mal = de[  eval_tidy( malaria_items) , display.vars ]
+  
+  de.search = de[ all.de, ]
+
+  reported_data_file = paste0( dataset.directory ,
+                           dhis_instance, 
+                           "_reported.rds" ) 
+  
+  
+  new.dataElements = NULL
+
+  
+  
+  if ( file.exists( reported_data_file) | !params$create_new ){
+    
+     d.reported =  readRDS( reported_data_file )
+     
+     d.reported.dataElements =  count( d.reported , dataElement ) %>% .$dataElement 
+     
+  } else {
+      
+      d.reported.dataElements = NULL 
+  }
+  
+  
+  new.dataElements =  setdiff( de.search$id[ order( de.search$id )] ,
+                               d.reported.dataElements 
+                               )
+
+  nde = length( new.dataElements )
+  
+  # Get number reported for all elements
+  if ( nde > 0 ){
+        
+        d.reported = api_last12months_national_data( 
+            
+            de.include = de[ all.de , ] ,
+            file = reported_data_file ,
+            details = TRUE 
+            
+            )
+        
+
+        saveRDS( d.reported , reported_data_file )
+        
+  } 
+
+  
+
+```
+
+
+### Request Data Completeness (form submissions) : number of  **data form** reported during last 12 months ('DHIS2 reporting')
 
 ```{r download_dataset_submissions.  }
 ## DataElements : details 
@@ -937,8 +1132,9 @@ summary_year = min( d.reported$period )
            forms_expected_lastyear
          ) 
  
-
+formattable( percent_dataset_reporting_last_year )
 ```
+
 
 ```{r d.mal.reported. }
 
@@ -947,7 +1143,7 @@ summary_year = min( d.reported$period )
 options = md$categoryCombos %>% 
     select( id, categories) %>% 
     unnest( categories ) %>%
-    rename( categoryCombo = id , category = id1 ) %>%
+    rename( categoryCombo.id = id , category = id1 ) %>%
     inner_join( md$categories  %>% select( id, categoryOptions ), 
                 by = c('category' = 'id' )
                 ) %>%
@@ -980,7 +1176,7 @@ options = md$categoryCombos %>%
 # left_join( options, categoryOptions , by=c('categoryCombo'='categoryCombo.id') ) %>% View
 
 # Select all malaria relevent variables
-malaria.groups = setdiff( names(searches) , c("TB", "imm", "HIV", "opd", "idp", "susp", "conf", "stock", "deaths") )
+malaria.groups = setdiff( names(searches) , c("TB", "imm", "HIV", "opd", "idp", "susp", "conf", "presumed", "stock", "deaths") )
                             
  all.possible.malaria = Reduce(  "|" , map( searches[ malaria.groups ], eval_tidy  ) )
   # sum( all.possible.malaria.de )
@@ -1079,6 +1275,8 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 #   It seems your data is too big for client-side DataTables. You may consider server-side processing: https://rstudio.github.io/DT/server.html
     
    datatable( d.mal.reported.top.dataset , filter = "top")
+   
+   formattable( d.mal.reported.top.dataset  )
 ```
 
 
@@ -1189,14 +1387,14 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
                 ) %>%     
                 
         # number reported       
-        # left_join( d.mal.reported.top.dataset %>%
-        #                group_by( dataElement.id ) %>%
-        #                summarise( 
-        #                    value = sum( val, na.rm = TRUE ) , 
-        #                    pVal = max( pVal, na.rm = TRUE )) , 
-        #            by = c( "dataElement.id" )   
-        #            
-        #            ) %>%
+        left_join( d.mal.reported.top.dataset %>%
+                       group_by( dataElement.id ) %>%
+                       summarise(
+                           value = sum( val, na.rm = TRUE ) ,
+                           pVal = max( pVal, na.rm = TRUE )) ,
+                   by = c( "dataElement.id" )
+
+                   ) %>%
             
          left_join( percent_dataset_reporting_last_year  , 
                     by = c( 'dataSet.id' = "dataSet")
@@ -1288,7 +1486,7 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
     
     sheets = excel_sheets( de.review.xlsx ) 
     
-    use_these_sheets = sheets %in% c( "malaria_stock", "stock", "pop", "attendance", "opd" , "ipd" , "malaria_items", "deaths" )
+    use_these_sheets = sheets %in% c( "malaria_stock", "stock", "pop", "attendance",  "malaria_items", "mal" , "deaths" )
     
     target_sheets = sheets[ use_these_sheets ]  
     
@@ -1332,7 +1530,10 @@ de.include = de.include %>%
     summarise( topic = paste0( unique( topic ), collapse = "")) %>% 
     distinct() %>%  
     arrange( topic, dataElement ) 
-    
+
+```
+
+```{r de.include_spreadsheet }
 
  de.include.xlsx = paste0( dataset.directory , 
                              dhis_instance , 
@@ -1360,7 +1561,7 @@ if ( file.exists(  de.include.xlsx  ) ) {
        
        browseURL(  de.include.xlsx  ) 
        
-   }
+}
 
 ```
 
@@ -1380,7 +1581,8 @@ meta_details = d.mal.reported %>%
 ## Combine
 data_element_table = de.include %>%
   
-    
+    filter( !is.na( Include ) ) %>%
+  
     left_join( 
         meta_details  
         , by = "dataElement"
@@ -1391,22 +1593,83 @@ data_element_table = de.include %>%
         funs( paste( unique(.) , collapse = ';\n' ) ) 
         ) %>%
     
-    mutate( topic = factor( topic , levels = unique( topics ) ) ) %>% 
+    # mutate( topic = factor( topic , levels = unique( topics ) ) ) %>% 
     
-    arrange( topic, dataElement )
-    
+    arrange( 
+      # topic, 
+      dataElement )
 
 data_element_table %>% rmarkdown::paged_table(.) 
 
+
+# set de.include  to be the reduced set of variables in data_element_table
+de.include = data_element_table 
 
 ```
 
 
 ## Request Data Totals 
 
+
+```{r data_totals_count}
+
+    data.totals.count.file = paste0( dataset.directory , 
+                               dhis_instance, "_count_totals.rds" )
+
+    nde = nrow( de.include )
+    
+    new.variables.request = sum( !de.include$dataElement.id %in% downloaded )  > 0 
+    
+    new.variables = de.include %>%
+      filter( !dataElement.id %in% downloaded )
+
+    # if doesn't exist or creating new, get dataset
+    if ( nde > 0 & ( params$create_new | !file.exists( data.totals.count.file ) | new.variables.request ) ){
+    
+        data_count_totals = api_data( 
+            
+            levels = levels.vector , 
+            de.vars = de.include ,
+            folder = dataset.directory ,
+            instance = params$dhis_instance ,
+            details = FALSE  ,
+            aggregationType = 'COUNT' )
+        
+        print( paste( "TOTAL:", 
+                       scales::comma( nrow( data_count_totals ) ) , 
+                       "records"  ) )
+        
+    # rename old one
+    
+      # Retrieve access data 
+      date_file = file.info( data.totals.count.file )$ctime 
+        
+        file.rename( data.totals.count.file ,
+                     paste0( data.totals.count.file , "." ,
+                            format( date_file , "%b%d%Y" )
+                            )
+                     )
+
+    if ( !file.exists( data.totals.count.file) ) saveRDS( data_count_totals , data.totals.count.file )
+        
+    
+    } else {
+        
+        # load previously downloaded dataset
+        data_count_totals = readRDS( data.totals.count.file )
+    }
+    
+
+    # get date
+    data_count_totals_date = file.info( data.totals.count.file )$mtime
+        
+
+```
+
+
 ```{r data_totals}
 
-    data.totals.file = paste0( origin.folder , "/" , 
+    data.totals.file = paste0( dataset.directory , 
                                dhis_instance, "_totals.rds" )
 
     nde = nrow( de.include )
@@ -1424,7 +1687,7 @@ data_element_table %>% rmarkdown::paged_table(.)
             levels = levels.vector , 
             de.vars = de.include ,
             folder = dataset.directory ,
-            file = data.totals.file ,
+            instance = params$dhis_instance ,
             details = FALSE  )
         
         print( paste( "TOTAL:", 
@@ -1462,10 +1725,67 @@ data_element_table %>% rmarkdown::paged_table(.)
 ## Request Data Details 
 
 
+```{r data_details_count}
+
+    data.details.count.file = paste0( dataset.directory , 
+                               dhis_instance,
+                               "_count_details.rds" )
+
+    nde = nrow( de.include )
+    
+    new.variables.request = sum( !de.include$dataElement.id %in% downloaded )  > 0 
+    
+    new.variables = de.include %>%
+      filter( !dataElement.id %in% downloaded )
+
+    # if doesn't exist or creating new, get dataset
+    if ( nde > 0 & ( params$create_new | !file.exists( data.details.count.file ) | new.variables.request ) ){
+    
+        data_count_details = api_data( 
+            
+            levels = levels.vector , 
+            de.vars = de.include ,
+            folder = dataset.directory ,
+            instance = params$dhis_instance ,
+            details = TRUE  ,
+            aggregationType = 'COUNT' )
+        
+        print( paste( "TOTAL:", 
+                       scales::comma( nrow( data_count_details ) ) , 
+                       "records"  ) )
+        
+    # rename old one
+    
+      # Retrieve access data 
+      date_file = file.info( data.details.count.file )$ctime 
+        
+        file.rename( data.details.count.file ,
+                     paste0( data.details.count.file , "." ,
+                            format( date_file , "%b%d%Y" )
+                            )
+                     )
+
+    if ( !file.exists( data.details.count.file) ) saveRDS( data_count_details , data.details.count.file )
+        
+    
+    } else {
+        
+        # load previously downloaded dataset
+        data_count_details = readRDS( data.details.count.file )
+    }
+    
+
+    # get date
+    data_count_details_date = file.info( data.details.count.file )$mtime
+        
+
+```
+
+
 ```{r data_details}
 ## DataElements : details 
 
-    data.details.file = paste0( origin.folder , "/" ,
+    data.details.file = paste0( dataset.directory ,
                                 dhis_instance, 
                                 "_details.rds" )
 
@@ -1476,7 +1796,7 @@ data_element_table %>% rmarkdown::paged_table(.)
             levels = levels.vector , 
             de.vars = de.include ,
             folder = dataset.directory ,
-            file = data.details.file ,
+            instance = params$dhis_instance ,
             details = TRUE
             
             )
@@ -1512,6 +1832,152 @@ data_element_table %>% rmarkdown::paged_table(.)
 ```
 
 
+
+## Request Indicator Details 
+
+
+```{r indicators}
+
+indicators = md$indicators
+
+malaria_terms = 'malaria palu RDT TDR IPT ACT ASAQ AL APT PTI SP slide fever fiev'
+
+malaria_search_terms = unlist( stri_extract_all_words(malaria_terms) )
+
+# add '\\<' so that only whole word is found
+malaria_search_terms_words = paste0( '\\<', malaria_search_terms, '\\>')
+
+mal_indicators = grepl( paste( malaria_search_terms, collapse = '|'), indicators$displayName , ignore.case = TRUE ) |
+  grepl( paste( malaria_search_terms, collapse = '|'), indicators$name , ignore.case = TRUE )
+
+mal_indicators_n = sum( mal_indicators )
+
+cols = map_lgl( indicators, ~!is.list(.x) )
+
+
+
+datatable( indicators[ mal_indicators , c( 'name', 'displayName' ) ]   )
+
+ datatable( indicators[mal_indicators, cols ] )
+ 
+
+```
+
+## There are `r nrow(indicators)` indicators.  Of these, `r mal_indicators_n` have a malaria seach term that includes: `r paste( malaria_terms) `.
+
+```{r ind_include}
+
+# for Burkina Faso, 675 is Paludisme confirme
+
+ind.include = indicators[ 675 , cols ]
+```
+
+```{r data_indicators_count}
+
+    data.indicators.count.file = paste0( dataset.directory , 
+                               dhis_instance,
+                               "_count_indicators.rds" )
+
+    nde = nrow( ind.include )
+    
+    new.variables.request = sum( !ind.include$id %in% downloaded )  > 0 
+    
+    new.variables = ind.include %>%
+      filter( !id %in% downloaded )
+
+    # if doesn't exist or creating new, get dataset
+    if ( nde > 0 & ( params$create_new | !file.exists( data.indicators.count.file ) | new.variables.request ) ){
+    
+        data_count_indicators = api_data( 
+            
+            levels = levels.vector , 
+            de.vars = ind.include ,
+            folder = dataset.directory ,
+            instance = params$dhis_instance ,
+            details = FALSE  ,
+            aggregationType = 'COUNT' )
+        
+        print( paste( "TOTAL:", 
+                       scales::comma( nrow( data_count_indicators ) ) , 
+                       "records"  ) )
+        
+    # rename old one
+    
+      # Retrieve access data 
+      date_file = file.info( data.indicators.count.file )$ctime 
+        
+        file.rename( data.indicators.count.file ,
+                     paste0( data.indicators.count.file , "." ,
+                            format( date_file , "%b%d%Y" )
+                            )
+                     )
+
+    if ( !file.exists( data.indicators.count.file) ) saveRDS( data_count_indicators , data.indicators.count.file )
+        
+    
+    } else {
+        
+        # load previously downloaded dataset
+        data_count_indicators = readRDS( data.indicators.count.file )
+    }
+    
+
+    # get date
+    data_count_indicators_date = file.info( data.indicators.count.file )$mtime
+        
+
+```
+
+
+```{r data_indicators}
+## DataElements : indicators 
+
+    data.indicators.file = paste0( dataset.directory ,
+                                dhis_instance, 
+                                "_indicators.rds" )
+
+    if ( nde > 0 & ( params$create_new | !file.exists( data.indicators.file ) | new.variables.request ) ){
+            
+        data_indicators = api_data( 
+            
+            levels = levels.vector , 
+            de.vars = ind.include ,
+            folder = dataset.directory ,
+            instance = params$dhis_instance ,
+            details = FALSE  ,
+            aggregationType = 'SUM' 
+            
+            )
+        
+        print( paste( "TOTAL:", 
+                  scales::comma( nrow( data_indicators ) ) , 
+                  "records"  ) )
+    
+    
+     # Retrieve access data 
+    date_file = file.info( data.indicators.file )$ctime 
+
+     if (file.exists( data.indicators.file )){   
+       file.rename( data.indicators.file ,
+                     paste0( data.indicators.file , "." ,
+                            format( date_file , "%b%d%Y" )
+                            )
+                     )
+     }
+    
+
+    saveRDS( data_indicators , data.indicators.file )
+    
+    } 
+
+    if ( !exists( "data.indicators" ) )  data_indicators = readRDS( data.indicators.file )   
+    
+    
+    # get date
+    data_indicators_date = file.info( data.indicators.file )$mtime
+        
+
+```
 
 # Summarise data
 
