@@ -3,6 +3,7 @@
 require(tidyselect)
 require( jsonlite )
 require(httr)
+require(curl)
 require(assertthat)
 require( progress )
 
@@ -167,7 +168,7 @@ get_resources = function( i , .pb = pb){
 
       group_ids = unlist(d$dataElementGroups)
 
-      data_frame(
+      tibble(
 
         id = if( is.null( group_ids) ){ d$id
           } else { rep( d$id, length(group_ids)  ) } ,
@@ -195,7 +196,7 @@ get_resources = function( i , .pb = pb){
       
       cat_ids = unlist( d$categoryCombo )
       
-      data_frame(
+      tibble(
         
         id = if( is.null( group_ids) ){ d$id
         } else { rep( d$id, length(group_ids)  ) } ,
@@ -261,7 +262,6 @@ get_resources = function( i , .pb = pb){
     return(dataIndicators) 
     
   }
-  
   
 # Organisational unit (osu) ids  ####
   if (element %in% c('osu', 'orgUnits') ){
@@ -351,83 +351,182 @@ get_resources = function( i , .pb = pb){
   # url<-paste0(baseurl,"api/system/info")
   # systemInfo = fromJSON( content(GET(url),"text") ) 
   
-## Levels from metatdata 
 
-levels_from_metatdata = function( md = NULL ){
+# DSDE: data frame of datasets and data elements ####
+dataSet_dataElement_df = function( md ){
+  
+  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
+                 ~map_df( md$dataSets$dataSetElements[[.x]], 
+                          ~as.matrix(.x) )) %>%
+    rename( dataElement.id = dataElement , 
+            dataSet.id = dataSet ) %>%
+    left_join( md$dataElements %>% select( id, name ) ,
+               by = c('dataElement.id' = 'id' )) %>%
+    rename( dataElement = name ) %>%
+    left_join( md$dataSets %>% select( id, name ) ,
+               by = c('dataSet.id' = 'id' )) %>%
+    rename( dataSet = name )
+  
+  # For versions <2.6, need to add categoryCombo
+  if ( !'categoryCombo' %in% names(dsde) ){
+    categoryCombos =  tibble(
+      dataSet = md$dataSets$id ,
+      categoryCombo = md$dataSets$categoryCombo$id )
     
-    # levels
-    levels = character()
+    dsde = dsde %>% inner_join( categoryCombos,  by = "dataSet")
+  }
+  
+  return(dsde)
+}
+
+
+# levels ####
+ou_levels = function( md , vector = TRUE , name = FALSE ){
+  
+  levels = character()
+  
+  if ( name ) {
+    levels = md$organisationUnitLevels %>% select( level, name ) %>%
+      arrange( level ) %>% pull( name )
     
-    for ( i in seq_along( md$organisationUnitLevels$id) ){
-        
-        levels =  c(levels, paste0("LEVEL-", i) )
+    return( levels )
+  }
+  
+  for ( i in seq_along( md$organisationUnitLevels$id) ){
+    
+    levels =  c( levels, paste0("LEVEL-", i) )
+  }
+  
+  if ( !vector ) levels = paste( levels, collapse = ";")
+  
+  return( levels )
+}
+
+## ous from metatadata ####
+
+ous_from_metatdata = function( .meta = NULL, 
+                               translate = TRUE ,
+                               meta_cols = c( 'id', 'name', 'openingDate', 'closedDate', 'lastUpdated' , 'path', 'coordinates' ) ,
+                               open.only = FALSE , # limit to clinics currently open, only, 
+                               fix = TRUE , 
+                               SF = TRUE ,
+                               simplify = TRUE ,
+                               ... ){
+    
+
+    # levels.vector = levels_from_metatdata( md )
+    if ( translate ){ 
+        ous = ous.translated(  .meta , meta_cols = meta_cols ) 
+    } else {
+        ous =  .meta$organisationUnits %>% select( meta_cols) %>% as_tibble 
     }
     
-    levels = paste( levels, collapse = ";")
+    fix_year = function( date ){
+        if (is.null( date ) ){ year = NA }
+        year = year( ymd_hms( date ) )
+        # ifelse ( year < 2008, 2008 , year )
+        return( year )
+    }
     
-    levels.vector = strsplit( levels, ";" , fixed = TRUE )[[1]]
+    openingDates = count(  ous, openingDate) %>% mutate( d = ymd_hms( openingDate ))
     
-}
-
-
-
-## ous from metatadata
-
-ous_from_metatdata = function( md = NULL ){
-    
-
-    levels.vector = levels_from_metatdata( md )
-    
-    
-    ous =  md$organisationUnits %>% 
-        select( id, path, name, shortName, coordinates , 
-                created, lastUpdated , ends_with('Date') 
-        ) %>% as.tibble %>%
-        rename( orgUnit.name = name ) %>%
-        rowwise() %>%
+    ous =  ous %>% 
+        # rowwise() %>%
         mutate( 
-            level = map_int( path, 
-                             ~length( gregexpr("/", .x, perl = TRUE)[[1]]) 
-            ) ,
-            parent.id =  map_chr( path, ~parse_parent_ous( .x ) ) ,
-            feature = map_chr( coordinates, ~feature_type(.x ) )
-        ) %>%
+
+            Year = openingDates[ match( .$openingDate, openingDates$openingDate) , ]$d %>% year 
+
+            , coordinates = if ( fix ){ fix_coordinate_brackets( coordinates ) }
+            
+            , openingDate = anydate( openingDate )
+            
+            , closedDate = anydate( closedDate )
+            
+            , lastUpdated = anydate( lastUpdated )
+            
+            , str_js = paste(
+
+                ifelse( feature %in% 'Polygon' ,
+                        '{ "type": "MultiPolygon", "coordinates": ' ,
+                        ifelse( feature %in% 'Point' ,
+                                '{ "type": "Point", "coordinates": ' , "" )
+                ) ,
+                coordinates , ' }'
+            )
+            
+        ) %>%  ungroup() 
+    
+    # Add SF geometry
+    if ( SF ){
         
-        # level names
-        left_join( select( md$organisationUnitLevel, name, level ) ,
-                   by = c('level'='level') ) %>% 
-        rename( level.name = name ) %>%
+        hasCoordinates = !is.na( ous$coordinates )
+
+        # Filter to those with coordinates; add geometry; add back rows without coordinates
+        ous.coord = geojson_sf( ous$str_js[ hasCoordinates ]  ) %>% 
+            bind_cols(
+                ous[ hasCoordinates , 'orgUnit' ] 
+            ) 
+
+        ous.sf = left_join( ous , ous.coord , by = "orgUnit" )
+        # glimpse(ous.df)
+    }
+
+    
+    # fixing holes and other issues.  added this simplify step to accomodate polygons with some geo-integrity problems (Nigeria)
+    if ( simplify & SF ){
         
-        # parent names
-        inner_join( md$organisationUnits %>% select( id, name ) ,
-                    by = c('parent.id' = 'id' ) ) %>%
-        ungroup() %>%
-        rename( parent_ou.name = name )
+        isPolygon = which( ous.sf$feature %in% "Polygon" )
+        
+        ous.sf$geometry[ isPolygon ] = 
+                                  rmapshaper::ms_simplify( ous.sf$geometry[ isPolygon ] ,
+                                                keep = .05 ,
+                                                drop_null_geometries = FALSE ,
+                                                keep_shapes = TRUE ) 
+        
+    }
+
+     # if this step fails--because it results in too little detail, increase the paramater keep = .50 or higher.  default is 0.05 
+    
+    # NB: todo:  test the polygons to see if they have too much detail (Malawi), compared with countries with very little (Nigeria)
+    
+    # plot( admins$polygons )
+    
+    # TODO: Check that admin polygons are in the bounding box for the country
+    # If not, try reversing lat/long or changing sign
+    
+
+    # _ for each non Admin orgUnit, 
+    # - if it is geocoded, check if it is within the admin it belongs to
+    # - if not geocoded, randomly assign geocode with admin it belongs to
+    # 
+    # Step: find orgUnit with polygon data that it belongs to. Separate path and transform to long lorm
+    
+    if ( SF ) ous = ous.sf %>% st_as_sf %>% ungroup()
+        
+    return( ous )
     
 }
+
 
 
 ## ous_ translated 
 
 ous.translated = function(  .meta = NULL, 
-                            open.only = TRUE  # limit to clinics currently open, only
+                            open.only = FALSE , # limit to clinics currently open, only
+                            meta_cols = c( 'id', 'name', 'openingDate', 'closedDate', 'path', 'coordinates' ) 
 ){
   
-  
-  
   stopifnot( !is.null( .meta ) )
-  
-  
-  meta_cols = c( 'id', 'name', 'openingDate', 'closedDate', 'path', 'coordinates' )
-  
+
   .meta$organisationUnits[ , meta_cols]  %>% 
     
-    as.tibble() %>% 
+    as_tibble() %>% 
     
     filter( if ( open.only ){ is.na(closedDate) } else { TRUE }  ) %>%  
     
     mutate(
-      feature = map_chr( coordinates, ~feature_type(.x ) ) 
+      feature = map_chr( coordinates, ~feature_type(.x ) )  
+ 
     ) %>%
     
     rowwise() %>%
@@ -463,7 +562,10 @@ ous.translated = function(  .meta = NULL,
                          perl = TRUE ) %>% 
                     gsub( ",\\[\\[(?=[-+]?[0-9])" , ",\\[\\[\\[" ,
                             . , 
-                            perl = TRUE )
+                            perl = TRUE ) %>% 
+                    # remove spurious quotation
+                    gsub( "\"" , "" , . ,
+                          perl = TRUE )
      
      return( fix_coordinates )
  }
@@ -494,70 +596,94 @@ ous.translated = function(  .meta = NULL,
  }
  
  
- is.in.parent = function( clinic.id , parent.id , plot = FALSE , fix = FALSE , .pb = NULL){
+ is.in.parent = function( clinic.id , parent.id , clinics = NULL , 
+                          plot = FALSE , fix = FALSE , .pb = NULL, 
+                          buffer_arc_seconds = .01 ){
      
+     if (is.null( clinics ) ) return()
      update_progress(.pb) 
      
-     long  = clinics$long[ clinics$id %in% clinic.id ]
-     lat  =  clinics$lat[ clinics$id %in% clinic.id ]
+     # long  = clinics$long[ clinics$id %in% clinic.id ]
+     # lat  =  clinics$lat[ clinics$id %in% clinic.id ]
+     # 
+     # if ( is.na(long) | is.na(lat) ) return( FALSE )
      
-     if ( is.na(long) | is.na(lat) ) return( FALSE )
+     if ( !any(  ous.sf$orgUnit %in% parent.id ) ) return( FALSE )
      
-     parent.polygon = admins$polygons[ admins$id %in% parent.id ]
+     parent = ous.sf[ ous.sf$orgUnit %in% parent.id , ]
      
-     if ( length( parent.polygon@polygons )== 0 ) return( FALSE )
+     if ( is.na( parent.id ) ) return( FALSE )
+     
+     # skip if parent is not a polygon
+     if ( !parent$feature %in% 'Polygon' ) return( NA )
      
      # flat projection
-     localCRS = "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+     # localCRS = "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
      
      # earth projection
-     standardCRS = "+proj=longlat +datum=WGS84"
+     # standardCRS = "+proj=longlat +datum=WGS84"
      
-     parent.polygon <- spTransform( parent.polygon, 
-                                    CRS( localCRS )
-     ) 
-     # 10 km buffer
-     parent.polygon = rgeos::gBuffer(parent.polygon , width = 10000) 
+     # parent.polygon <- spTransform( parent.polygon, 
+     #                                CRS( localCRS )
+     # ) 
+     
+     # 1 km buffer (not implemented in this version)
+     # parent.polygon = rgeos::gBuffer(parent.polygon , width = 1000)
+     # buffer_arc_seconds = .01
+     parent.polygon = parent$geometry
+     parent.polygon = suppressWarnings( suppressMessages(
+         st_buffer( parent.polygon , dist = buffer_arc_seconds )
+         # dist is in arc-seconds, approx 31 meters at equator. default = 30, 1km
+     ))
+     # plot(parent.polygon)
      
      # if no decimal place, numbers are huge..
-     if ( abs(long) > 180 ) return( FALSE )
-     if ( abs(lat) > 180 ) return( FALSE )
+     # if ( abs(long) > 180 ) return( FALSE )
+     # if ( abs(lat) > 180 ) return( FALSE )
      
-     clinic.coords = c(  long , lat )
+     # clinic.coords = c(  long , lat )
+     clinic.coords = clinics %>% filter( orgUnit %in% clinic.id ) %>% 
+         pull(geometry)
+     parent.polygon = parent$geometry 
      
-     clinic.coords.matrix = matrix(clinic.coords, nrow = 1 )
-     
-     clinic.spatialPoint = SpatialPoints( clinic.coords.matrix  , 
-                                          proj4string = CRS( standardCRS  )
+     is.in = suppressMessages( # block 'st_intersects assumes that they are planar'
+         st_intersects(clinic.coords ,  parent.polygon, sparse = FALSE  ) %>%
+         apply(., 1, any) # returns true if any are true
      )
      
-     clinic.spatialPoint  = spTransform( clinic.spatialPoint , CRS( localCRS ) ) 
+     # clinic.coords.matrix = matrix(clinic.coords, nrow = 1 )
+     # 
+     # clinic.spatialPoint = SpatialPoints( clinic.coords.matrix  , 
+     #                                      proj4string = CRS( standardCRS  )
+     # )
      
-     if ( plot ){ 
-         plot( parent.polygon )
-         points(clinic.spatialPoint, col = 'red' )
-     }
-     
-     is.in = sp::over( clinic.spatialPoint ,  parent.polygon )
-     
-     is.in = ifelse( is.na( is.in ) , FALSE, TRUE )
+     # clinic.spatialPoint  = spTransform( clinic.spatialPoint , CRS( localCRS ) ) 
+     # 
+     # if ( plot ){ 
+     #     plot( parent.polygon )
+     #     points(clinic.spatialPoint, col = 'red' )
+     # }
+     # 
+     # is.in = sp::over( clinic.spatialPoint ,  parent.polygon )
+     # 
+     # is.in = ifelse( is.na( is.in ) , FALSE, TRUE )
      
      # Potential fixes
      ## reverse lat-long
      if (is.in == FALSE & fix ){
          
-         clinic.coords = c( lat , long ) # reverse
+         coords = st_coordinates( clinic.coords ) 
+         coords.df = data_frame( long = coords[2] , lat = coords[1])  # reversed
          
-         clinic.coords.matrix = matrix(clinic.coords, nrow = 1 )
+         clinic.coords.reversed = st_as_sf( coords.df ,
+                                            coords = c( "long", "lat" ) , # reverse
+                                            crs = get_projection( clinic.coords ) 
+                                            )
          
-         clinic.spatialPoint = SpatialPoints( clinic.coords.matrix  , 
-                                              proj4string = CRS( standardCRS  )
-         ) %>%
-             spTransform( . , CRS( localCRS ) ) 
-         
-         is.in = sp::over( clinic.spatialPoint ,  parent.polygon )
-         
-         is.in = ifelse( is.na( is.in ) , FALSE, TRUE )
+         is.in = suppressMessages( # block 'st_intersects assumes that they are planar'
+             st_intersects( clinic.coords.reversed ,  parent.polygon, sparse = FALSE  ) %>%
+                 apply(., 1, any) # returns true if any are true
+         )
          
          if ( is.in ) return( is.in )
          
@@ -693,23 +819,27 @@ ous.translated = function(  .meta = NULL,
                       levels = NA , 
                       de.vars = NA , # a data.frame like _key_data_elements.rds
                       folder = "" ,
-                      file = "" ,
+                      instance = NULL , 
                       dsde = NULL , 
-                      details = FALSE 
+                      details = FALSE ,
+                      aggregationType = 'SUM' # 'COUNT'  
  ){
      
-     if ( is.null( file ) ){
+     if ( is.null( instance ) ){
          
-         cat("Need to give name of file where data will be saved")
+         cat("Need to give name of instance( e.g. country name )")
          return()
          
      }
      
-     file. = paste0( folder , file )
+     if ( is.null( folder ) ){
+         
+         cat("Need to give location of folder to store data in")
+         return()
+         
+     }
      
-     instance = strsplit( file , "_" )[[1]][1]
-     
-     # folder to store monthly data
+      # folder to store monthly data
      if ( details ){ 
          folder.monthly = paste0( folder , "dataElement_details" )
      } else {
@@ -720,9 +850,11 @@ ous.translated = function(  .meta = NULL,
      if ( !dir.exists( folder.monthly ) ) dir.create( folder.monthly )
      
      if ( details ){ 
-         file.monthly = paste0( folder.monthly, "/", instance , "_details_" )
+         file.monthly = paste0( folder.monthly, "/", instance , "_" ,
+                                aggregationType , "_details_" )
      } else {
-         file.monthly = paste0( folder.monthly, "/" , instance , "_totals_" )
+         file.monthly = paste0( folder.monthly, "/" , instance ,"_",
+                                aggregationType , "_totals_" )
      }
 
       # periods to download
@@ -751,7 +883,10 @@ ous.translated = function(  .meta = NULL,
 
      } else {
          
-         dataElements = de.vars
+         dataElements = de.vars 
+         if ( !'dataElement.id' %in% names( dataElements) ){
+           dataElements$dataElement.id = dataElements$id
+         }
      }
      
    
@@ -824,14 +959,14 @@ ous.translated = function(  .meta = NULL,
                  de.index = which( md$dataElements$id %in% dataElements$dataElement.id[ element ] )
                  
                  # data.frame of dataElement-id and categorycomb0-id
-                 de.catCombo = data_frame( 
+                 de.catCombo = tibble( 
                      dataElement = md$dataElements$id[ de.index ] ,
                      dataElement.name = md$dataElements$name[ de.index ] ,
                      categoryCombo = md$dataElements$categoryCombo$id[ de.index ] 
                  )
                  
                  # CategoryOptions for each categoryCombo
-                 catOptCombos =  data_frame( 
+                 catOptCombos =  tibble( 
                      categoryOptionCombo = md$categoryOptionCombos$id ,
                      categoryOptionCombo.name = md$categoryOptionCombos$name ,
                      categoryCombo = md$categoryOptionCombos$categoryCombo$id
@@ -872,18 +1007,14 @@ ous.translated = function(  .meta = NULL,
                  # print( paste( levels[level] , ifelse( details, "Details", "") ) )
                  
                  #Assemble the URL ( before starting, double check semicolons for dx dimension )
-                 url <- paste0( baseurl, "api/analytics/dataValueSet.json?" ,
-                                
+
+                 url <- paste0( baseurl, 
+                                "api/analytics/dataValueSet.json?" ,
                                 "&dimension=ou:", levels[level] , 
-                                
                                 "&dimension=pe:" , periods[period] ,
-                                
-                                "&dimension=dx:" , 
-                                
-                                # malaria
-                                de.ids ,
-                                
-                                "&displayProperty=NAME")
+                                "&dimension=dx:" , de.ids , 
+                                "&displayProperty=NAME",
+                                "&aggregationType=" , aggregationType )
                  
                  # print( url )
                  
@@ -1259,7 +1390,7 @@ ous.translated = function(  .meta = NULL,
                  # print( paste( periods, ":" , nrow(fetch), "records." ) )
                  
              } else {
-                 data.level[[ level ]] = data_frame( 
+                 data.level[[ level ]] = tibble( 
                      dataElement = dataElement.ids[ element ] ,
                      period =  periods ,
                      orgUnit =  levels[level] ,
@@ -1411,5 +1542,7 @@ ous.translated = function(  .meta = NULL,
          spread( stat, formatted)  %>% 
          select( variable , n, missing, hist )
  }
+ 
+ # MDQSA Munging functions
  
  
