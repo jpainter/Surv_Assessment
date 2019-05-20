@@ -1,5 +1,6 @@
 ---
-title: DHIS2 Metadata
+title: ""
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
     
   html_document:
@@ -27,21 +28,22 @@ params:
   data_directory: datasets
   output_directory: ./ # bug: only uses current directory
   output_format: html_document
-  cache: FALSE
+  cache: TRUE
   echo: FALSE
 ---
 
 <!-- NB:  If cache = TRUE, MUST clear cache when changing to country for review.  If not, markdown throws error: 'Error: path for html_dependency not found:' -->
 
-# **`r toupper( params$dhis_instance )` Metadata** {.tabset .tabset-fade}
+# **`r toupper( params$dhis_instance )` 
+
+# DHIS2 Metadata** {.tabset .tabset-fade}
 
 
 ```{r packages, echo = TRUE, cache=FALSE, warning=FALSE, include = FALSE }
 
 
 # list of required packages
-    package.list = c("rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "pander" ,
-                     "geojsonR", "rmapshaper" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "scales", "RcppRoll", "zoo", "gridExtra", "futile.logger", "Hmisc", "stringi", "rlang" , "tidyselect" , "tidyverse", "readxl" , "knitrProgressBar" )
+    package.list = c( 'zoo' , "tidyverse" ,"rlist", "listviewer", "DT", "knitr", "kableExtra", "xts", "leaflet", "geojsonR", "wellknown" , "geojsonio" , "sp" , "rmapshaper" , "rgeos" , "RColorBrewer", "DT", "dygraphs", "httr", "jsonlite", "XML", "assertthat", "lubridate", "anytime" , "scales", "RcppRoll", "zoo", "tsibble", "seasonal", "forecast", "stlplus",  "gridExtra", "futile.logger", "Hmisc", "pander" , "stringi", "rlang" , "htmltools" , "tidyselect" , "broom" , "ggthemes" , "readxl", "knitrProgressBar" , 'osmdata', 'sf' ,  "geojsonsf" , 'tmap', 'formattable'  )
 
 # Function to test if package is installed 
     pkgTest <- function( package.list = package.list ){
@@ -55,12 +57,14 @@ params:
     pkgTest( package.list )
 
 # load the packages
-    lapply( package.list, suppressMessages( require ) , character.only = TRUE)
+    suppressMessages( 
+      lapply( package.list,  require , character.only = TRUE)
+    )
 
 
 knitr::opts_chunk$set( echo = params$echo ,
-                       fig.width =  8, 
-                       fig.height = 10,
+                       fig.width =  3.5, 
+                       fig.height = 4,
                        dpi = 300 ,
                        # knitr.table.format = "html" ,
                        cache = params$cache # TRUE for testing; FALSE for production
@@ -118,7 +122,7 @@ knitr::opts_chunk$set( echo = params$echo ,
     
     outputs = tibble( 
         output_format = c(  "html_document", 'word_document'),
-        output_suffix = c(  "html", 'doc' )
+        output_suffix = c(  "html", 'docx' )
     )
     
     output.suffix = outputs %>% 
@@ -160,8 +164,17 @@ knitr::opts_chunk$set( echo = params$echo ,
   
 ```
 
+## About DHIS2
 
-## Metadata Structure
+```{r}
+system_data_file = paste0( dataset.directory , dhis_instance, "_system_data.rds" ) 
+
+system_data = readRDS( system_data_file )
+
+kable( t( system_data ) )
+```
+
+## Structure
 
 ```{r}
 
@@ -169,7 +182,10 @@ knitr::opts_chunk$set( echo = params$echo ,
                            dhis_instance, 
                            "_metadata.rds" ) 
 
-    md = read_rds( meta_data_file )
+    md = read_rds( meta_data_file ) 
+    
+    # re-order
+    md = md[ order( names(md) ) ]
 
 # Retrieve access data 
   date_metadata = file.info( meta_data_file )$ctime 
@@ -177,17 +193,12 @@ knitr::opts_chunk$set( echo = params$echo ,
 ```
 
 
-Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.    
-
-`r params$dhis_instance` is running DHSI2, version **`r md$system$version`** (rev. `r md$system$rev`), last updated `r md$system$date`.
-
-
-
+Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `**.   
 ```{r list_viewer, eval= FALSE }
  jsonedit( md )
 ```
 
-## Metadata list
+## List
 
 ```{r attribute_numbers }
 
@@ -202,16 +213,6 @@ Results shown are for data accessed on **`r format(date_metadata, "%d %B %Y") `*
   #     pander_styling(  bootstrap_options = c("striped", "hover") ) %>%
   #       column_spec(1, bold = T) %>%
   #     scroll_box(height = "500px")
-
-```
-
-<!-- ## Metadata viewer -->
-
-```{r list_metadata, eval=FALSE}
-
-z = lapply( md , function(x) x = x[[1]] )
-
-listviewer::jsonedit( md )
 
 ```
 
@@ -236,7 +237,7 @@ There are `r  md$organisationUnits %>% nrow %>% comma()` organisation units in `
               Name = level.name)
   
   pander( ousFeatures, align = c( 'l', 'l', 'r' ) ,
-                caption = paste( "Organisational Unit Levels" ) 
+                caption = paste( "Numbers of Organisational Unit Levels and GIS coordinates" ) 
           # ,  bootstrap_options = c("striped", "hover")
           )
 
@@ -266,8 +267,6 @@ pander( listing_no_coordinates )
 
 ```{r ous_charts_by_level}
 
- periods = unique()
-
  # vector of periods as dates
   p = strsplit( periods , ";" , fixed = TRUE )[[1]]
   p = paste0( p , "01")
@@ -276,37 +275,51 @@ pander( listing_no_coordinates )
   levels = ou_levels( md , name = FALSE ) 
   level.names = ou_levels( md , name = TRUE ) 
   
-  # number of units per level 
-   n.level = list()
-   for ( i in seq_along( levels ) ){
-      
-      n = map_df(  p , ~ous %>% as_tibble %>%
-                      filter( level , level.name %in% level.names[i] ,
-                              openingDate < .x   , 
-                              ( closedDate > .x | is.na( closedDate ) )
-                            ) %>%
-                      mutate( period = .x ) %>%
-                      count( level , level.name , period, feature ) 
-      ) 
-      
-      n.level[[i]] = n 
-   }
-   
-   n.level.df = bind_rows( n.level ) %>% 
-     # remove layer where count is always one (national layer)
-     group_by( level ) %>%
-     mutate( max = max( n , na.rm =  TRUE ) ) %>%
-     filter( max > 1 )
-   
-   # replace missing feature with 'No_Coordinates'
-   n.level.df$feature[ is.na( n.level.df$feature )] = 'None'
   
-  # convert month-Yr to dat
-  n.level.df$month = fast_strptime( as.character(  n.level.df$period ) , "%Y-%m-%d") %>% as.yearmon()
+  # number of units per level
+  ou_numbers_file = paste0( dataset.directory ,
+                           dhis_instance, 
+                           "_ou_numbers.rds" ) 
+  
+  if ( !file.exists( ou_numbers_file ) ){
+     n.level = list()
+     for ( i in seq_along( levels ) ){
+        
+        n = map_df(  p , ~ous %>% as_tibble %>%
+                        filter( level , level.name %in% level.names[i] ,
+                                openingDate < .x   , 
+                                ( closedDate > .x | is.na( closedDate ) )
+                              ) %>%
+                        mutate( period = .x ) %>%
+                        count( level , level.name , period, feature ) 
+        ) 
+        
+        n.level[[i]] = n 
+     }
+     
+     n.level.df = bind_rows( n.level ) %>% 
+       # remove layer where count is always one (national layer)
+       group_by( level ) %>%
+       mutate( max = max( n , na.rm =  TRUE ) ) %>%
+       filter( max > 1 )
+     
+     # replace missing feature with 'No_Coordinates'
+     n.level.df$feature[ is.na( n.level.df$feature )] = 'None'
+    
+    # convert month-Yr to dat
+    n.level.df$month = fast_strptime( as.character(  n.level.df$period ) , "%Y-%m-%d") %>% as.yearmon()
+    
+    saveRDS(  n.level.df , file = ou_numbers_file )
+    
+  } else {
+    
+    n.level.df = readRDS( ou_numbers_file )
+  }
   
   ggplot( n.level.df,  aes(x = month, y = as.integer(n), group = feature , color = feature )) + 
       geom_line( size = 1 ) +
       expand_limits( y = 0 ) +
+      scale_x_yearmon( format = "%Y" ) +
       scale_color_discrete("Coordinates") +
       theme_minimal() + 
       labs( title = "Monthly Number of orgUnits" , y = " " , x ="") +
@@ -343,46 +356,98 @@ pander( n.level.table )
 
 ## Administrative boundaries and facilities 
 
-```{r}
+```{r ou_admins_and_hf }
+admins = ous %>% filter( feature %in% 'Polygon'  )
 
+hf = ous %>% filter( feature %in% 'Point'  )
 
-admins_file =  paste0( dataset.directory , dhis_instance, "_admin_boundaries.rds" ) 
-admins = readRDS( admins_file)
+```
 
+<!-- TODO update imputed section -->
 
-clinics_file =  paste0( dataset.directory , dhis_instance, "_facilities.rds" ) 
-clinics = readRDS( clinics_file)
+```{r table_imputed_ou , eval=FALSE}
 
-
-updated_facilities_file =  paste0( dataset.directory , dhis_instance, "_updated_facilities.rds" ) 
-
-
-facilities = readRDS( updated_facilities_file )
-
-     
 # imputed 
 count( facilities , has.coordinates, impute )
 
 ```
 
-## Map: Health facilities with number of confirmed malaria cases 
 
 - Number of orgunits per administrative area 
 
-```{r orgunit.per.area }
+```{r orgunit.per.area  }
 
 #  count units per parentid and join with admins
-facilitiescount = facilities %>% count( parent.id )
+facilitiescount = hf %>% st_set_geometry(NULL) %>% count( parent_ou ) 
 
-admins.count = admins %>% select( -polygons) %>%
-    left_join( facilitiescount , by = c ( 'id' = 'parent.id' ) )  
+# admins.count = admins %>% 
+#   filter( level %in% 3 ) %>%
+#   # as_tibble() %>%
+#   # select( -geometry) %>%
+#     st_join( facilitiescount , join = st_within )  
 
-admins.count$polygons = admins$polygons
-admins.count$lat = geosphere::centroid( admins$polygons )[, 2 ]
-admins.count$long = geosphere::centroid( admins$polygons )[, 1 ]
+admins_hf_count = merge( admins %>% filter( level == 3 ) ,
+                         facilitiescount , by.x = "orgUnit" , by.y = "parent_ou" ,
+                         all.x = TRUE )
 
+# pander( admins.count %>% ungroup %>% as_tibble() %>% select( orgUnit.name , n, -geometry ) ) 
+
+tm_shape( admins_hf_count ) + 
+  tm_polygons("n") +
+  tm_layout( frame = FALSE  , legend.outside = TRUE )
+
+# admins.count$polygons = admins$polygons
+# admins.count$lat = geosphere::centroid( admins$polygons )[, 2 ]
+# admins.count$long = geosphere::centroid( admins$polygons )[, 1 ]
+
+
+# Map of regions with HFC
+admins %>%
+    filter( level %in% 2 ) %>%
+    rename( Region = orgUnit.name ) %>%
+  
+    tm_shape( . ) + 
+    tm_polygons( "Region" ) + 
+    # tm_dots( "HF" ) +
+    tm_layout( frame = FALSE  , legend.outside = TRUE ) +
+  
+    tm_shape( hf %>% mutate( level = factor( level ) )  ) +  
+    tm_dots( "level" , alpha = .2, col = 'black' , size = .01, 
+             border.alpha = .2, border.col = 'black' )
 ```
 
+```{r ou_maps_additional , eval=FALSE}
+# Map of regions 
+admins %>%
+    filter( level %in% 2 ) %>%
+    rename( Region = orgUnit.name ) %>%
+    tm_shape( .   ) + 
+    tm_polygons( "Region") + 
+    # tm_dots( "HF" ) +
+    tm_layout( frame = FALSE , legend.outside = TRUE )
+
+# Map of districts 
+admins %>%
+    filter( level %in% 3 ) %>%
+    rename( District = orgUnit.name ) %>%
+    tm_shape( . ) + 
+    tm_polygons( "District" ) + 
+    tm_layout( frame = FALSE , legend.outside = TRUE ) 
+    
+
+# map of HF -- note that this is all facilities, regardless of whether it supplies OPD data
+hf %>%
+    # filter( level %in% 3 ) %>%
+    mutate( level = factor( level ) ) %>%
+    rename( HF = orgUnit.name ) %>%
+    tm_shape( . ) + 
+    # tm_
+    # tm_dots( "level" ) + 
+    tm_dots( 'HF' ) + 
+    tm_layout( frame = FALSE ) + 
+    tm_legend(show=FALSE)
+    
+```
 
 ## Categories linked with orgUnits
   
@@ -394,7 +459,7 @@ There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help ident
 
 # Number of facilities reporting each data element
 
-```{r}
+```{r d.reported_data }
 
     reported_data_file = paste0( origin.folder ,
                            dhis_instance, 
@@ -408,24 +473,13 @@ There are `r  md$dataElements %>% nrow %>% comma()` data elements. To help ident
 A list of variables was queried to see how many org units submitted data last year.  In total, there were `r  nrow( d.reported ) %>% scales::comma() ` variables queried. Of these, there were `r sum( !is.na(d.reported$value ) ) ` variables that were submitted by at least one org unit.  A listing of the variable can be found in the spreadsheet `r dhis_instance`_dataElements.xlsx.  
 
 
-```{r }
+```{r dsde_data }
 # data frame of datasets and data elements
-  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
-            ~map_df( md$dataSets$dataSetElements[[.x]], 
-                     ~as.matrix(.x) )) %>%
-    rename( dataElement.id = dataElement , 
-            dataSet.id = dataSet ) %>%
-    left_join( md$dataElements %>% select( id, name ) ,
-               by = c('dataElement.id' = 'id' )) %>%
-    rename( dataElement = name ) %>%
-    left_join( md$dataSets %>% select( id, name ) ,
-               by = c('dataSet.id' = 'id' )) %>%
-    rename( dataSet = name )
+  dsde = dataSet_dataElement_df( md )
 ```
 
 
-
-```{r }
+```{r options_per_category }
 
 # number of options in each catgory combo
 
@@ -538,7 +592,7 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
 ## suggested key data elements
 
-```{r}
+```{r suggeest_key_elements }
 
  de.key = d.mal.reported %>%
     filter( pVal > .3 ) %>%
@@ -552,7 +606,7 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 
 How many **categories** are there? `r length( md$categories$id ) `
 
-```{r }
+```{r list_categories }
     md$categories %>% select( id , name ) %>%
     # walk( print( paste( "There are" , length(md$categories$id ) , 
                  # "categories.") 
@@ -569,7 +623,7 @@ How many **category combos** are there?
                      n_distinct( ),
                  "categories.") `
 
-```{r}
+```{r list_category_combos }
     # md$categoryCombos %>% select( id , name ) 
 
     cc = tibble(
@@ -712,20 +766,8 @@ There are `r  md$dataSets %>% nrow %>% comma()` datasets. Of these, `r sum( map_
 <!-- TODO: show dataset- group- and data elements together -->
 
 ```{r dataset_dataElement_categoryCombos}
-  # data frame of datasets and data elements
-  dsde = map_df( 1:length(md$dataSets$dataSetElements), 
-            ~map_df( md$dataSets$dataSetElements[[.x]], 
-                     ~as.matrix(.x) ))
 
-# For versions <2.6, need to add categoryCombo
-    if ( !'categoryCombo' %in% names(dsde) ){
-      categoryCombos =  tibble(
-          dataSet = md$dataSets$id ,
-          categoryCombo = md$dataSets$categoryCombo$id )
-      
-      dsde = dsde %>% inner_join( categoryCombos,  by = "dataSet")
-    }
-
+dsde = dataSet_dataElement_df( md )
 
 ```
 

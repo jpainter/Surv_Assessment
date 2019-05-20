@@ -1,16 +1,31 @@
 
-# functions to get dhis data
-require(tidyselect)
-require( jsonlite )
-require(httr)
-require(curl)
-require(assertthat)
-require( progress )
+# required libraries for these functions ####
+
+package.list = c( 'tidyverse', 'tidyselect' , "jsonlite" ,"httr", "curl", "assertthat" )
+
+# Function to test if package is installed 
+pkgTest <- function( package.list = package.list ){
+    
+    missing.packages = setdiff( package.list , rownames(installed.packages())) 
+    if ( length( missing.packages ) > 0 ) install.packages( missing.packages ) 
+}
+
+## Test if packages loaded
+pkgTest( package.list )
+
+## load the packages
+suppressMessages( 
+    lapply( package.list,  require , character.only = TRUE)
+)
+
 
 # Login ####
 loginDHIS2<-function( baseurl, username, password) {
+  
   url<-paste0( baseurl, "api/me" )
-  r <- GET(url, authenticate(username, password) )
+  
+  r <-  GET( url, authenticate(username, password) ) 
+    
   assert_that( r$status_code == 200L ) }
   
 # JSON helper function ####
@@ -19,9 +34,9 @@ get = function( source_url , .print = TRUE , ...){
     
     if ( .print ) print( paste( "downloading from" , source_url , "...") )
     
-    from_url = GET( source_url )
+    from_url =  GET( source_url ) 
     
-    if ( from_url$status_code != 200 ) return()
+    if ( from_url$status_code != 200 ) return( FALSE )
     
     g = fromJSON( 
         
@@ -36,7 +51,7 @@ get_resources = function( i , .pb = pb){
     
     print( paste( "Metadata item-", i , ":" , resources$plural[i] ) ) 
     
-    update_progress(.pb)
+    if (!is.null( .pb ) ) update_progress(.pb)
     
     url.schema <- paste0( resources$href[i] , ".json?fields=:all&paging=false" )
     schema = get( url.schema  ) 
@@ -352,12 +367,83 @@ get_resources = function( i , .pb = pb){
   # systemInfo = fromJSON( content(GET(url),"text") ) 
   
 
+# DHIS2_Join_metadata ####
+# parameters:  
+  # attribute: name of attribute, eg. dataElement
+  # d: dataset to join
+  # metadata
+# Result:  renames 'name' to attribute.name, then performs left join
+dhis2_Join_metadata = function( .data , 
+                                attribute = 'dataElements' , 
+                                by = NULL ,
+                                metadata = md ,
+                                otherVars = NULL ){
+    
+  .data = as_tibble( .data )
+    
+  if (is.null( by ) ) by = attribute 
+    
+  if ( !any(grepl( by , names( .data ) )) ) return(NA)
+    
+  new.name  =  paste0( by , ".name") 
+  
+  new.id  =   by 
+  
+  id = ifelse( by %in% "level", 'level' , 'id')
+    
+  attribute.data = metadata[attribute][[1]] %>%
+      select( !!id, name, 
+              if ( !is.null( otherVars ) ) !!otherVars  
+                ) %>%
+      rename( 
+        
+              !!new.id := !!id ,
+              
+              !!new.name := "name" )
+  
+  by.attribute.integer = is.integer( attribute.data[, by ] )
+  by.data.integer = is.integer( .data[, by ] )
+  
+  if ( by.attribute.integer != by.data.integer ){
+
+      if ( by.data.integer ){
+           
+            attribute.data[ , by ] = suppressWarnings( 
+                # avoids 'NAs introduced by coercion' message
+                as.integer( attribute.data[ , by ] )
+                )
+      } else {
+          
+            attribute.data[ , by ] = suppressWarnings( 
+              # avoids 'NAs introduced by coercion' message
+              as.character( attribute.data[ , by ] )
+          )
+      }
+      }
+      
+  .data %>%
+      left_join( . , attribute.data , by = by )
+
+}
+
+# dhis2_Join_metadata( ) %>% glimpse
+# dhis2_Join_metadata( attribute = 'organisationUnitLevels', by = 'level') %>% glimpse
+# md$organisationUnits %>% dhis2_Join_metadata(. ,'organisationUnitLevels', 'level')
+# d = md$dataSets[1,]$organisationUnits[[1]] %>% rename( organisationUnit = id) 
+# d %>% dhis2_Join_metadata(. ,'organisationUnits', 'organisationUnit')
+
+
 # DSDE: data frame of datasets and data elements ####
-dataSet_dataElement_df = function( md ){
+dataSet_dataElement_df = function( md , rename = TRUE ){
   
   dsde = map_df( 1:length(md$dataSets$dataSetElements), 
                  ~map_df( md$dataSets$dataSetElements[[.x]], 
-                          ~as.matrix(.x) )) %>%
+                          ~as.matrix(.x) )) 
+  
+
+  if (rename) 
+    
+  dsde = dsde %>%
     rename( dataElement.id = dataElement , 
             dataSet.id = dataSet ) %>%
     left_join( md$dataElements %>% select( id, name ) ,

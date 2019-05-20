@@ -1,0 +1,123 @@
+---
+title: "Whats in your DHIS2?"
+version: "0.90"
+output: 
+
+  html_document:
+    css: custom.css
+    toc: TRUE
+    # toc_float: TRUE
+    toc_depth: 4
+    code_folding: hide
+    fig_caption: TRUE
+    self_contained: TRUE
+    # template: html_template.html 
+    
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+
+source('dhis2_functions.R')
+
+
+```
+
+# HMIS  
+
+
+```{r credentials, echo=FALSE}
+inputPanel(
+    
+  textInput("baseurl", label = "DHIS2 URL:", "https://play.dhis2.org/2.28/" ),
+  
+  textInput("username", label = "User name:", "admin"),
+  
+  passwordInput("password", label = "Password:", "district")
+)
+
+baseurl = reactive({
+        # if url is from login or dashboard url, trimto get baseurl
+       baseurl = gsub( "dhis-web-commons/security/login.action"  , "" , input$baseurl , 
+                       fixed = TRUE  ) 
+       baseurl = gsub( "dhis-web-dashboard-integration/index.html"  , "" , baseurl , 
+                       fixed = TRUE  ) 
+       
+})
+
+login = reactive({ 
+    
+      # purrr::possibly(
+        loginDHIS2( baseurl() , input$username, input$password) 
+      #   otherwise = FALSE
+      # )
+
+    })
+
+```
+
+##  Available metadata resources 
+
+```{r resources  }
+resources = reactive({
+ 
+     if ( login() ){
+        # there are a couple forms of metadata in the api.  This code tests the format, then gets metadata
+        # if available, use resources method
+       
+        url = paste0( baseurl() , "api" )
+        resources =  get( url )[['resources']]  %>% as_tibble() %>%
+          arrange( displayName )
+     }
+}) 
+
+conditionalPanel(condition="$('html').hasClass('shiny-busy')",
+                          tags$div("Loading...",id="loadmessage")
+         ) 
+
+renderTable( 
+    
+    resources() ,
+    striped = TRUE , spacing = 's' 
+
+)
+```
+
+## Data Elements 
+
+```{r data_elements }
+
+conditionalPanel(condition="$('html').hasClass('shiny-busy')",
+                          tags$div("Loading...",id="loadmessage")
+         ) 
+
+# download button
+ downloadHandler(filename = function() { 
+    return(paste('data_element_names', '.csv', sep=''))
+
+ }, content = function(file) {
+   write.csv( dataElements() , file)
+ })
+
+dataElements = reactive({
+        
+    if (  login() ){
+    
+    # there are a couple forms of metadata in the api.  This code tests the format, then gets metadata
+    # if available, use resources method
+    url<-paste0( input$baseurl,"api/dataElements.json?fields=:all&paging=false")
+    cols = c( 'id', 'name', 'shortName' , 'displayName', 'displayShortName' , 'categoryCombo'  )
+    dataElements =  get( url )[[1]] %>% select( !!cols ) 
+    
+    } else { "Unable to login to server" }
+}) 
+
+renderTable( 
+    
+    dataElements()  ,
+    striped = TRUE , spacing = 's' 
+
+)
+```

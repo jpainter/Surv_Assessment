@@ -16,7 +16,7 @@ params:
   dhis_instance: Malawi
   data_directory:  datasets
   output_directory: 
-  output_format: html_document
+  output_format: word_document
   display_reports: FALSE 
   create_new: FALSE 
   cache: FALSE
@@ -48,7 +48,9 @@ This script creates the review documents by first downloading and cleaning some 
     pkgTest( package.list )
 
 # load the packages
-    lapply( package.list, suppressMessages( require ) , character.only = TRUE)
+    suppressMessages( 
+      lapply( package.list, require  , character.only = TRUE) 
+    )
 
 # To render htmo in word doc: https://bookdown.org/yihui/bookdown/html-widgets.html
     # install.packages("webshot")
@@ -93,17 +95,15 @@ source('dhis2_functions.R')
     
     
     # this folder will hold output of the metadata and data reviews
-    output.directory =  ifelse( is.null( params$output_directory ) , 
+    output.directory =  ifelse( is_null( params$output_directory ) , 
                                 origin.folder , # the directory where this file sits. 
                                 paste0(  params$output_directory , "/" , origin.folder )
     )
     
-   
-    
-    
+
     outputs = tibble( 
         output_format = c(  "html_document", 'word_document'),
-        output_suffix = c(  "html", 'doc' )
+        output_suffix = c(  "html", 'docx' )
     )
     
     output.suffix = outputs %>% 
@@ -240,8 +240,8 @@ if ( !file.exists( base_map_file ) ){  # stop
        # geom_raster(data = hill.df, aes(lon, lat, fill = hill), alpha = .45) +
        # scale_fill_gradientn(colours = grey.colors(100)) +
        geom_sf(data = osm_lakes.sf , fill = '#9ecae1', colour = NA) +
-       # geom_sf(data = osm_rivers.sf, colour = '#9ecae1', size = 0.05) +
-       # geom_sf(data = osm_roads_primary.sf, colour = 'red', size = 0.1, alpha = .1 ) +
+       geom_sf(data = osm_rivers.sf, colour = '#9ecae1', size = 0.05) +
+       geom_sf(data = osm_roads_primary.sf, colour = 'red', size = 0.1, alpha = .1 ) +
        # geom_sf(data = osm_roads_secondary.sf, colour = 'brown', size = 0.05, alpha = .1) +
        # geom_sf(data = osm_roads_tertiary.sf, colour = '#636363', size = 0.02) +
        # geom_sf(data = my_bbox_buff_2500.sf, fill = NA) +
@@ -264,6 +264,25 @@ if ( !file.exists( base_map_file ) ){  # stop
 
 
 ## Metadata
+
+### 0.  System verion
+
+
+
+```{r system version}
+
+# login to DHIS and fill and copy/replace values into table below
+system_data =  tibble( version = "2.28" ,
+                       build_revision = "aff610f" ,
+                       build_date = "2018-03-09" , 
+                       server_date = "2019-05-06" , 
+                       time_since_last_analytics_table_generation = "90 h, 53 m, 56 s" , 
+                       last_analytice_table_runtime = "1 h, 38 m, 53 s" )
+
+system_data_file = paste0( dataset.directory , dhis_instance, "_system_data.rds" ) 
+saveRDS(system_data, system_data_file )
+```
+
 
 ### 1. Download DHIS2 Metadata (~5-10 min)
 
@@ -465,7 +484,8 @@ admins = md$organisationUnits %>%
 
 ### Points and Polygons as SF
 
-```{r}
+```{r ous_from_metatdata }
+
 ous = ous_from_metatdata( md , simplify = TRUE , SF = TRUE ) 
 
  # save 
@@ -480,52 +500,6 @@ ous = ous_from_metatdata( md , simplify = TRUE , SF = TRUE )
  
  if ( file.exists( ous_file ) ) ous.sf = readRDS( ous_file )
        
-admins = ous %>% filter( feature %in% 'Polygon'  )
-
-hf = ous %>% filter( feature %in% 'Point'  )
-
-# Map of regions 
-admins %>%
-    filter( level %in% 2 ) %>%
-    rename( Region = orgUnit.name ) %>%
-    tm_shape( .   ) + 
-    tm_polygons( "Region") + 
-    # tm_dots( "HF" ) +
-    tm_layout( frame = FALSE , legend.outside = TRUE )
-
-# Map of districts 
-admins %>%
-    filter( level %in% 3 ) %>%
-    rename( District = orgUnit.name ) %>%
-    tm_shape( . ) + 
-    tm_polygons( "District" ) + 
-    tm_layout( frame = FALSE , legend.outside = TRUE ) 
-    
-
-# map of HF -- not that this all facilities, regardless of whether it supplies OPD data
-hf %>%
-    # filter( level %in% 3 ) %>%
-    mutate( level = factor( level ) ) %>%
-    rename( HF = orgUnit.name ) %>%
-    tm_shape( . ) + 
-    # tm_
-    # tm_dots( "level" ) + 
-    tm_dots( 'HF' ) + 
-    tm_layout( frame = FALSE ) + 
-    tm_legend(show=FALSE)
-    
-
-# Map of regions with HFC
-admins %>%
-    filter( level %in% 2 ) %>%
-    rename( Region = orgUnit.name ) %>%
-    tm_shape( . ) + 
-    tm_polygons( "Region" ) + 
-    # tm_dots( "HF" ) +
-    tm_layout( frame = FALSE  , legend.outside = TRUE ) +
-    tm_shape( hf %>% mutate( level = factor( level ) )  ) +  
-    tm_dots( "level" , alpha = .2, col = 'black' , size = .01, 
-             border.alpha = .2, border.col = 'black' )
 ```
 
  <!-- deprecated -->
@@ -577,6 +551,7 @@ _ for each non Admin orgUnit,
 
 Step: find orgUnit with polygon data that it belongs to. Separate path and transform to long lorm
 
+
 ```{r clinics2.}
 
  # if ( !exists( "clinics" ) | params$create_new ) clinics = readRDS( clinics_file )
@@ -604,6 +579,7 @@ clinics. = hf %>%
 - Check if facility with coordinates is in parent 
 
 <!-- TODO:  This only works for level one below the admin units.  Does not work for CHW assigned to facilities.  Update code to check if CHW are in the admin area of the facility they are associated with.   -->
+
 
 ```{r facilityInParent. }
 
@@ -796,7 +772,7 @@ if ( !exists( "facilities" ) ){
     # create new
     if ( !file.exists( output.filename )  ) { 
 
-        rmarkdown::render( 'Display_Metadata.Rmd' ,
+        rmarkdown::render( 'Display_Brief_Metadata.Rmd' ,
                            
            output_file = output.filename ,
            output_format = output_format ,
@@ -1069,7 +1045,9 @@ dsde = dataSet_dataElement_df( md )
                dataElement = name
        ) 
 
-            
+    ## TODO fix error in api_dataset, 'object 'levels.vector' not found'
+    levels.vector =  ou_levels( md , name = FALSE ) 
+    
         dataset_reporting = api_dataset( 
                                 levels = levels.vector[1] , 
                                 
@@ -1144,7 +1122,10 @@ summary_year = min( d.reported$period )
                                   na.rm = TRUE ) ,
          form_submission_rate = forms_submitted_lastyear /
            forms_expected_lastyear
-         ) 
+         ) %>%
+   dhis2_Join_metadata( "dataSets" , "dataSet") %>%
+   select( dataSet.name , forms_expected_lastyear	,
+           forms_ontime_lastyear	, form_submission_rate , dataSet  )
  
 formattable( percent_dataset_reporting_last_year )
 ```
@@ -1288,7 +1269,7 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
 # Warning: data too big for datatable
 #   It seems your data is too big for client-side DataTables. You may consider server-side processing: https://rstudio.github.io/DT/server.html
     
-   datatable( d.mal.reported.top.dataset , filter = "top")
+   # datatable( d.mal.reported.top.dataset , filter = "top")
    
    formattable( d.mal.reported.top.dataset  )
 ```
@@ -1305,15 +1286,15 @@ d.mal.reported = d.reported[ , c("dataElement", "value")] %>%
     # previous.include -- if some data already downloaded 
         downloaded = NA 
                     
-        data.totals.file = paste0( dataset.directory ,
+        data.details.file = paste0( dataset.directory ,
                            dhis_instance, 
-                           "_totals.rds" )
+                           "_details.rds" )
 
-        if ( file.exists( data.totals.file ) ){
+        if ( file.exists( data.details.file ) ){
             
-            data_totals = readRDS( data.totals.file ) 
+            data_details = readRDS( data.details.file ) 
             
-            downloaded = count( data_totals, dataElement ) %>%
+            downloaded = count( data_details, dataElement ) %>%
                 pull( dataElement )
         }
 
@@ -1625,7 +1606,7 @@ de.include = data_element_table
 ## Request Data Totals 
 
 
-```{r data_totals_count}
+```{r data_totals_count, eval=FALSE}
 
     data.totals.count.file = paste0( dataset.directory , 
                                dhis_instance, "_count_totals.rds" )
@@ -1681,7 +1662,7 @@ de.include = data_element_table
 ```
 
 
-```{r data_totals}
+```{r data_totals , eval=FALSE}
 
     data.totals.file = paste0( dataset.directory , 
                                dhis_instance, "_totals.rds" )
@@ -1739,7 +1720,7 @@ de.include = data_element_table
 ## Request Data Details 
 
 
-```{r data_details_count}
+```{r data_details_count }
 
     data.details.count.file = paste0( dataset.directory , 
                                dhis_instance,
