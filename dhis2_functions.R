@@ -1,7 +1,8 @@
 
 # required libraries for these functions ####
 
-package.list = c( 'tidyverse', 'tidyselect' , "jsonlite" ,"httr", "curl", "assertthat" )
+package.list = c( 'tidyverse', 'tidyselect' , "jsonlite" ,"httr", "curl", "assertthat" ,
+                  "anytime" , "geojsonsf" , "sf")
 
 # Function to test if package is installed 
 pkgTest <- function( package.list = package.list ){
@@ -26,7 +27,8 @@ loginDHIS2<-function( baseurl, username, password) {
   
   r <-  GET( url, authenticate(username, password) ) 
     
-  assert_that( r$status_code == 200L ) }
+  assert_that( r$status_code == 200L ) 
+  }
   
 # JSON helper function ####
 ## gets json text from url and converts to data frame 
@@ -54,6 +56,7 @@ get_resources = function( i , .pb = pb){
     if (!is.null( .pb ) ) update_progress(.pb)
     
     url.schema <- paste0( resources$href[i] , ".json?fields=:all&paging=false" )
+    
     schema = get( url.schema  ) 
     
     if ( !is.null( schema) ) return( schema )
@@ -380,7 +383,13 @@ dhis2_Join_metadata = function( .data ,
                                 otherVars = NULL ){
     
   .data = as_tibble( .data )
-    
+  
+  metadata = metadata[attribute][[1]]
+  
+  # be sure that we have data.frame, not list of data.frame
+  if ( class( metadata ) %in% 'list' )  metadata = metadata[[1]] %>% as.data.frame() 
+  if ( !class( metadata ) %in% 'data.frame' ) return(NA)
+  
   if (is.null( by ) ) by = attribute 
     
   if ( !any(grepl( by , names( .data ) )) ) return(NA)
@@ -391,7 +400,9 @@ dhis2_Join_metadata = function( .data ,
   
   id = ifelse( by %in% "level", 'level' , 'id')
     
-  attribute.data = metadata[attribute][[1]] %>%
+  
+  
+  attribute.data = metadata %>%
       select( !!id, name, 
               if ( !is.null( otherVars ) ) !!otherVars  
                 ) %>%
@@ -497,12 +508,13 @@ ous_from_metatdata = function( .meta = NULL,
                                fix = TRUE , 
                                SF = TRUE ,
                                simplify = TRUE ,
+                               simplify.keep = .015 , # larger numbers yield less detail
                                ... ){
     
 
     # levels.vector = levels_from_metatdata( md )
     if ( translate ){ 
-        ous = ous.translated(  .meta , meta_cols = meta_cols ) 
+        ous = ous.translated(  .meta , meta_cols = meta_cols  ) 
     } else {
         ous =  .meta$organisationUnits %>% select( meta_cols) %>% as_tibble 
     }
@@ -530,17 +542,34 @@ ous_from_metatdata = function( .meta = NULL,
             
             , lastUpdated = anydate( lastUpdated )
             
-            , str_js = paste(
-
-                ifelse( feature %in% 'Polygon' ,
-                        '{ "type": "MultiPolygon", "coordinates": ' ,
-                        ifelse( feature %in% 'Point' ,
-                                '{ "type": "Point", "coordinates": ' , "" )
-                ) ,
-                coordinates , ' }'
-            )
-            
-        ) %>%  ungroup() 
+            , str_js = 
+                ifelse( is.na(coordinates), NA , 
+                    paste(
+                    ifelse( feature %in% 'Polygon' ,
+                            '{ "type": "MultiPolygon", "coordinates": ' ,
+                            ifelse( feature %in% 'Point' ,
+                                    '{ "type": "Point", "coordinates": ' , "")
+                    ) ,
+                    coordinates , ' }'
+                )
+                )
+        ) %>%
+        ungroup() 
+    
+  
+        # fix json strings with leading zeros, then add back zeros in front of decimal
+        # Lastly, replace exponential decimals e.g. 'E-4' with 0
+        ous$str_js = gsub("(?<![0-9])0+", "", ous$str_js , perl = TRUE)
+        ous$str_js = gsub("-.", "-0.", ous$str_js , fixed = TRUE)
+        ous$str_js = gsub(",.", ",0.", ous$str_js , fixed = TRUE)
+        ous$str_js = gsub("[.", "[0.", ous$str_js , fixed = TRUE)
+        ous$str_js = gsub(",]", ",0]", ous$str_js , fixed = TRUE)
+        ous$str_js = gsub(".]", ".0]", ous$str_js , fixed = TRUE)
+        ous$str_js = gsub("E-[0-9]", "0", ous$str_js , perl = TRUE)
+        ous$str_js = gsub(".,", ".0,", ous$str_js , fixed = TRUE)
+        ous$str_js = gsub(".]", ".0]", ous$str_js , fixed = TRUE)
+        ous$str_js = gsub("[,", "[0.0,", ous$str_js , fixed = TRUE)
+        ous$str_js = gsub(",]", ",0.0]", ous$str_js , fixed = TRUE)
     
     # Add SF geometry
     if ( SF ){
@@ -548,7 +577,7 @@ ous_from_metatdata = function( .meta = NULL,
         hasCoordinates = !is.na( ous$coordinates )
 
         # Filter to those with coordinates; add geometry; add back rows without coordinates
-        ous.coord = geojson_sf( ous$str_js[ hasCoordinates ]  ) %>% 
+        ous.coord = geojson_sf( ous$str_js[ hasCoordinates]  ) %>% 
             bind_cols(
                 ous[ hasCoordinates , 'orgUnit' ] 
             ) 
@@ -565,7 +594,7 @@ ous_from_metatdata = function( .meta = NULL,
         
         ous.sf$geometry[ isPolygon ] = 
                                   rmapshaper::ms_simplify( ous.sf$geometry[ isPolygon ] ,
-                                                keep = .05 ,
+                                                keep = simplify.keep ,
                                                 drop_null_geometries = FALSE ,
                                                 keep_shapes = TRUE ) 
         
@@ -682,11 +711,13 @@ ous.translated = function(  .meta = NULL,
  }
  
  
- is.in.parent = function( clinic.id , parent.id , clinics = NULL , 
+ is.in.parent = function( clinic.id , parent.id , 
+                          ous = NULL ,
+                          # clinics = NULL , 
                           plot = FALSE , fix = FALSE , .pb = NULL, 
                           buffer_arc_seconds = .01 ){
      
-     if (is.null( clinics ) ) return()
+     if (is.null( ous ) ) return()
      update_progress(.pb) 
      
      # long  = clinics$long[ clinics$id %in% clinic.id ]
@@ -694,9 +725,9 @@ ous.translated = function(  .meta = NULL,
      # 
      # if ( is.na(long) | is.na(lat) ) return( FALSE )
      
-     if ( !any(  ous.sf$orgUnit %in% parent.id ) ) return( FALSE )
+     if ( !any(  ous$orgUnit %in% parent.id ) ) return( FALSE )
      
-     parent = ous.sf[ ous.sf$orgUnit %in% parent.id , ]
+     parent = ous[ ous$orgUnit %in% parent.id , ]
      
      if ( is.na( parent.id ) ) return( FALSE )
      
@@ -728,9 +759,14 @@ ous.translated = function(  .meta = NULL,
      # if ( abs(lat) > 180 ) return( FALSE )
      
      # clinic.coords = c(  long , lat )
-     clinic.coords = clinics %>% filter( orgUnit %in% clinic.id ) %>% 
+     clinic.coords = ous %>% filter( orgUnit %in% clinic.id ) %>% 
          pull(geometry)
+     
      parent.polygon = parent$geometry 
+     
+     # parent.coords = ous %>% filter( orgUnit %in% parent.id ) 
+     # %>% 
+     #     pull(geometry)
      
      is.in = suppressMessages( # block 'st_intersects assumes that they are planar'
          st_intersects(clinic.coords ,  parent.polygon, sparse = FALSE  ) %>%
@@ -745,10 +781,18 @@ ous.translated = function(  .meta = NULL,
      
      # clinic.spatialPoint  = spTransform( clinic.spatialPoint , CRS( localCRS ) ) 
      # 
-     # if ( plot ){ 
-     #     plot( parent.polygon )
-     #     points(clinic.spatialPoint, col = 'red' )
-     # }
+     if ( plot ){
+         
+         ggplot( parent  ) +
+             geom_sf( ) +
+             # geom_sf_label( aes(label = parent_ou.name) ) +
+         
+         # ggplot(  ) +
+             geom_sf( data = clinic.coords , color = 'red') +
+             geom_sf_label( data = clinic.coords , 
+                            aes(label = orgUnit.name), 
+                            vjust = -1 )
+     }
      # 
      # is.in = sp::over( clinic.spatialPoint ,  parent.polygon )
      # 
@@ -763,7 +807,7 @@ ous.translated = function(  .meta = NULL,
          
          clinic.coords.reversed = st_as_sf( coords.df ,
                                             coords = c( "long", "lat" ) , # reverse
-                                            crs = get_projection( clinic.coords ) 
+                                            crs = st_crs( clinic.coords ) 
                                             )
          
          is.in = suppressMessages( # block 'st_intersects assumes that they are planar'
@@ -781,21 +825,25 @@ ous.translated = function(  .meta = NULL,
 
  impute.location = function( parent.id , plot = FALSE  ){
      
-     parent.polygon = admins$polygons[ admins$id %in% parent.id ]
+     parent.polygon = admins[ admins$orgUnit %in% parent.id , ]
      
-     if ( length( parent.polygon@polygons ) == 0 ) return( list( NA , NA )   )
+     if ( nrow( parent.polygon ) == 0 ) return( list( NA , NA )   )
      
-     clinic.spatialPoint = spsample( parent.polygon , 1 , type = "random", iter = 10 ) 
+     clinic.spatialPoint = suppressMessages(
+         st_sample( parent.polygon , 1 , type = "random", iter = 10 ) 
+     )
      
      if ( plot ){ 
-         plot( parent.polygon )
-         points(clinic.spatialPoint, col = 'red' )
+         plot( st_geometry( parent.polygon ) )
+         plot(clinic.spatialPoint, col = 'red', add = T )
      }
      
-     long = clinic.spatialPoint@coords[1]
-     lat = clinic.spatialPoint@coords[2]
+     imputed.coords = st_coordinates( clinic.spatialPoint )
+     # long = imputed.coords['X']
+     # lat = imputed.coords['Y']
      
-     return( list( long, lat ) )
+     # return( list( long, lat ) )
+     return( imputed.coords )
  }
  
  

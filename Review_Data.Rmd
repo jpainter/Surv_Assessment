@@ -1,30 +1,34 @@
 ---
 output:
   html_document:
+    
     # css: custom.css
     toc: true
     toc_float: true
     code_folding: hide
     fig_caption: yes
     self_contained: no
-    
   word_document: 
     toc: true
     fig_caption: yes
-
     
 always_allow_html: yes
-
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Kenya.demo
+  data_directory: 
+  dhis_instance: Uganda
   create_new: FALSE 
-  data_directory:  
+  dataset_directory:  datasets  
   output_directory: ./ # bug: only uses current directory
   cache: FALSE
   echo: FALSE
 ---
+
+```{r run_this_code_to_create_and_save_a_copy, eval= FALSE}
+ # pander...rmarkdown....
+```
+
 
 # **`r params$dhis_instance`** {.tabset .tabset-fade}
 <!-- load libraries... -->
@@ -84,6 +88,9 @@ source('dhis2_functions.R')
                                   ) ,
                           dhis_instance , "/")
   
+   # sub-folder for data
+   dataset.directory = paste0( origin.folder , params$dataset_directory , "/" )
+    
  # login shortcuts
 
   # origin.login shortcut
@@ -100,7 +107,7 @@ source('dhis2_functions.R')
 
 ```{r all_meta }
 
-  meta_data_file = paste0( origin.folder ,
+  meta_data_file = paste0( dataset.directory , 
                            dhis_instance, 
                            "_metadata.rds" )
 
@@ -118,7 +125,7 @@ Data from selected data will be downloaded for the period 2013-2017, from all or
 
 
 
-```{r date_strings, eval=FALSE }
+```{r date_strings }
 
  
   periods = date_code() # default: 2013-2017
@@ -130,7 +137,7 @@ Data from selected data will be downloaded for the period 2013-2017, from all or
   
 ```
 
-```{r ous, eval=FALSE }  
+```{r ous }  
 
 # Same code as chunk 'ou_and_levels' from Metadata_Review.Rmd
 
@@ -157,7 +164,7 @@ feature_type = function( coordinate ){
    ous =  md$organisationUnits %>% 
         select( id, path, name, shortName, coordinates , 
                 created, lastUpdated, ends_with('Date') 
-                ) %>% as.tibble %>%
+                ) %>% as_tibble %>%
        rename( ous = name ) %>%
         mutate( 
           ous = ifelse( ous %in% "", shortName, ous ) , #if name blank, use shortName
@@ -179,7 +186,7 @@ feature_type = function( coordinate ){
     
 ```
 
-```{r ou_levels, eval=FALSE}
+```{r ou_levels }
 # levels
       levels = character()
       for ( i in seq_along( md$organisationUnitLevels$id) ){
@@ -201,137 +208,17 @@ feature_type = function( coordinate ){
 ```{r data_elements_include }
 
 
-    de.review.xlsx = paste0( output_directory , "/" ,
-                             dhis_instance , "/" ,
-                             dhis_instance , "_" , 
-                             "dataElements.xlsx" ) 
-
-    sheets = excel_sheets(de.review.xlsx) 
-    
-    use_these_sheets = sheets %in% c( "malaria_stock", "stock", "pop", "attendance", "opd" ,
-                                      "ipd" , "malaria_items")
-    
-    target_sheets = sheets[ use_these_sheets ]  
-    
-    # get selected rows from every spreadsheet tab
-    de.include = map_df(  seq_along( target_sheets ) , 
-                         ~readxl::read_xlsx( de.review.xlsx ,  sheet = target_sheets[.x] ) %>% 
-                             filter( !is.na(Include) ) ) %>%
-        
-        distinct( dataElement.id, .keep_all = TRUE )
-
-    # if none selected, pick intersection of malaria and confirmed 
-    if ( nrow( de.include) == 0 ){
-        
-        de.include = read_rds( paste0( origin.folder ,
-                               dhis_instance, 
-                               "_key_data_elements.rds" ) 
-                            ) 
-            
-    }
-
-```
-
-
-## DataElements : Totals 
-
-```{r data_total }
-  
-    data.totals.file = paste0( origin.folder , 
-                     dhis_instance, 
-                     "_dataset_totals.rds" )
-
-    nde = nrow( de.include )
-
-    if ( nde > 0 & params$create_new | !file.exists( data.totals.file ) ){
-    
-        data_totals = api_data( 
-            
-            levels = levels.vector , 
-            de.vars = de.include ,
-            file = data.totals.file ,
-            details = FALSE , 
-            submissions =  FALSE )
-        
-        print( paste( "TOTAL:", 
-                       scales::comma( nrow( data_totals ) ) , 
-                       "records"  ) )
-    
-    } else {
-        
-        data_totals = readRDS( data.totals.file )
-    }
-    
-    if ( file.exists( data.totals.file ) & params$create_new ){
-        
-        file.rename( data.totals.file ,
-                     paste( data.totals.file ,
-                            format( Sys.time(), "%b%d%Y" )
-                            )
-                     )
-    }
-    
-    if ( !file.exists( data.totals.file) ) saveRDS( data_totals , data.totals.file )
-        
-    # get date
-    data_totals_date = file.info( data.totals.file )$mtime
-        
-
-```
-
-
-The totals data, `r scales::comma( nrow( data_totals ) )` records,  was downloaded on `r data_totals_date`.
-
-
-```{r count_dataElements_in_data, comment="" }
-
-  # List data elements by name
-  data_totals %>% 
-    # names of data elements
-    left_join( select(md$dataElements, id, name) ,
-                      by = c("dataElement" = "id")
-                      ) %>%
-    select( -dataElement ) %>% 
-    rename( dataElement = name ) %>%
-    # summarise reports by dataElement
-    group_by( dataElement) %>% 
-    summarise( 
-        Reported = n() ,
-        orgUnits = n_distinct( orgUnit ) ,
-        First =  as.yearmon( min( period ), "%Y%m") %>% format(., "%b-%Y"),
-        Last = as.yearmon( max( period ), "%Y%m") %>% format(., "%b-%Y")
-        ) %>% 
-    arrange( -Reported ) %>%
-    mutate( Reported = comma( Reported ), 
-            orgUnits = comma( orgUnits ) 
-            ) %>%
-
-    datatable( rownames = FALSE, options= list( pageLength = 15, scrollY = TRUE ) )
-
-
-```
-
-## Describe data elements
-
-
-```{r describe_totals}
-
-   dt = data_totals %>%
-        left_join( md$dataElements %>% select( id , name ) ,
-                    by = c( 'dataElement' = 'id' ) ) %>%
-        rename( de.name = name ) 
-
-    # spread data so that each column is a variable; keep only numeric cols
-    df = dt %>% 
-        # select( orgUnit, period,  element_combo, value ) %>%
-        mutate( value = as.numeric( value ), 
-                year = substr(period, 1,4) ) %>%
-        select( period, year , orgUnit, value, de.name ) %>%
-        spread( de.name, value  ) 
-    
-    
-    skim( df ) %>% pander
+   de.include.xlsx = paste0( dataset.directory , 
+                             dhis_instance , 
+                             "_dataElements_selected.xlsx" )
  
+# if file exists, rename
+  if ( file.exists( de.include.xlsx )   ){ 
+        
+        de.include = readxl::read_xlsx( de.include.xlsx ) 
+            
+    }
+
 ```
 
 
@@ -342,46 +229,19 @@ The totals data, `r scales::comma( nrow( data_totals ) )` records,  was download
 ```{r data_details}
 ## DataElements : details 
 
-    data.details.file = paste0( origin.folder , 
+    data.details.file = paste0( dataset.directory ,  
                      dhis_instance, 
-                     "_dataset_details.rds" )
+                     "_details.rds" )
 
-    nde = length( de.include )
-
-    if ( nde > 0 & params$create_new | !file.exists( data.details.file )  ){
-            
-        data_details = api_data( 
-            
-            periods = periods.vector , 
-            levels = levels.vector , 
-            de.vars = de.include ,
-            file = data.details.file ,
-            details = TRUE , 
-            submissions =  FALSE 
-            
-            )
+    if ( file.exists( data.details.file )  ){
         
-        print( paste( "TOTAL:", 
+        data_details = read_rds( data.details.file )
+    }
+
+    print( paste( "TOTAL:", 
                   scales::comma( nrow( data_details ) ) , 
                   "records"  ) )
-    
-    }
-    
-    if ( file.exists( data.details.file ) & params$create_new ){
-        
-        file.rename( data.details.file ,
-                     paste( data.details.file ,
-                            format( Sys.time(), "%b%d%Y" )
-                            )
-                     )
-    }
-    
-    if ( !file.exists( data.details.file) ) saveRDS( data_details , data.details.file )
-    
-    
-    data_details = readRDS( data.details.file )   
-    
-    
+
     # get date
     data_details_date = file.info( data.details.file )$mtime
         
@@ -404,14 +264,25 @@ Summarise data details values by dataElement_categoryOptionCombo
         unite( element_combo , de.name, cat.name )
 
     # spread data so that each column is a variable; keep only numeric cols
-    df = dd %>% 
-        group_by( level ) %>%
-        # select( orgUnit, period,  element_combo, value ) %>%
-        mutate( value = as.numeric( value )) %>%
-        spread( element_combo, value  ) %>%
-        purrr::keep(is.numeric)
+    ## !! Memeory error with large datasets (e.g. Uganda but not malawi)
+    # df = dd %>% 
+    #     group_by( level ) %>%
+    #     # select( orgUnit, period,  element_combo, value ) %>%
+    #     mutate( value = as.integer( value )) %>%
+    #     spread( element_combo, value  ) %>%
+    #     purrr::keep(is.integer)
     
-    skim( df ) %>% pander
+    # Try same wtih data.table
+    dd = data.table::data.table( dd %>%
+        mutate( value = as.integer( value ))
+        )
+    
+    df = data.table::dcast( dd , level + orgUnit + period ~ element_combo, 
+                value.var = "value") 
+        
+    
+    skim_format(numeric = list(digits = 2,  big.mark = ","))
+    skim_to_wide( df ) %>% pander( split.table = Inf  )
     
     ## html data table
     # stw = skim_to_wide( df %>% filter( level == 4 ) ) 
@@ -436,107 +307,13 @@ Summarise data details values by dataElement_categoryOptionCombo
 ```
 
 
+## DataElements : Totals 
 
-## Verify:  Sum of data-details equals data-totals
-
-The following table is sorted by the difference between sums for each variable.
-
-```{r verify_details_total }
-
-    sum_details = data_details %>%
-        group_by( dataElement ) %>%
-        summarise(
-            sum_details = sum( as.numeric( value ) , na.rm = TRUE ) 
-        )
-
-    sum_totals = data_totals %>%
-        group_by( dataElement ) %>%
-        summarise(
-            sum_totals = sum( as.numeric( value ) , na.rm = TRUE ) 
-        )
-    
-    left_join( sum_details , sum_totals, by = 'dataElement' ) %>%
-        left_join( md$dataElements %>% select( id, name ) , 
-                   by = c( 'dataElement' = 'id' ) 
-                   ) %>%
-        select( dataElement, name, sum_details, sum_totals ) %>% 
-        mutate( difference = abs( sum_totals - sum_details ) )  %>%
-        arrange( -difference ) %>%
-        mutate_if( is.numeric, comma ) %>%
-        datatable()
-    
-```
-
-Why are some totals > than sum of details/categories? (only evaluate if there is problem verify that sum(details) = totals)
-
-```{r, eval = FALSE}
-
-# summarise and compare by period
-
-    # choose data element to examine
-    de = 'GOXEXTR0uST'
-
-# Compare by month
-    sum_details = data_details %>%
-        filter( dataElement %in% de ) %>%
-        group_by( dataElement , period) %>%
-        summarise(
-            sum_details = sum( as.numeric( value ) , na.rm = TRUE ) 
-        )
-
-    sum_totals = data_totals %>%
-        filter( dataElement %in% de ) %>%
-        group_by( dataElement , period ) %>%
-        summarise(
-            sum_totals = sum( as.numeric( value ) , na.rm = TRUE ) 
-        )
-    
-    left_join( sum_details , sum_totals, 
-               by = c( 'dataElement', 'period' ) 
-               ) %>%
-        select( period, sum_details, sum_totals ) %>% 
-        mutate( difference = abs( sum_totals - sum_details ) )  %>%
-        arrange( -difference ) %>%
-        mutate_if( is.numeric, comma )
-    
-# Compare by month, orgUnit
-    sum_details = data_details %>%
-        filter( dataElement %in% de )  %>%
-        group_by( dataElement , period, orgUnit ) %>%
-        summarise(
-            sum_details = sum( as.numeric( value ) , na.rm = TRUE ) 
-        )
-
-    sum_totals = data_totals %>%
-        filter( dataElement %in% de ) %>%
-        group_by( dataElement , period, orgUnit ) %>%
-        summarise(
-            sum_totals = sum( as.numeric( value ) , na.rm = TRUE ) 
-        )
-    
-    compare = left_join( sum_details , sum_totals, 
-               by = c( 'dataElement', 'period' , 'orgUnit' ) 
-               ) %>%
-        left_join( md$organisationUnits %>% select( id, name ) ,
-                   by = c( 'orgUnit' = 'id' ) ) %>%
-        select( period, orgUnit, name, sum_details,  sum_totals ) %>% 
-        mutate( difference = abs( sum_totals - sum_details ) )  %>%
-        arrange( -difference ) %>%
-        mutate_if( is.numeric, comma ) 
-    
-    compare %>% filter( difference > 0 ) %>% View
-    
-    count( compare %>% filter( difference > 0 ), period ) %>% print( n = 100 )
-    
-    # look at details...
-    data_details %>% 
-        select(dataElement,period, orgUnit, categoryOptionCombo, value) %>%
-        filter( dataElement %in% de, 
-                period %in% '201506',
-                orgUnit %in% (compare %>% filter( difference > 0 ) %>% .$orgUnit) ) %>%
-        spread( categoryOptionCombo, value ) %>%
-        left_join( compare ) %>%
-        View
+```{r data_totals}
+ data_totals  = data_details %>% 
+    group_by( period, orgUnit, dataElement ) %>%
+    summarise( value = sum( as.integer( value ) )) %>%
+    ungroup()
 ```
 
 
@@ -597,42 +374,18 @@ Values shown are for the periods from `r min(periods.vector)` to `r max(periods.
 ```{r download_dataset_submissions }
 ## DataElements : details 
 
-  dataset.submission.file = paste0( origin.folder , 
+  dataset.reporting.file = paste0( dataset.directory ,  
                      dhis_instance ,  
-                     "_dataset_submissions.rds" )
+                     "_dataset_reporting.rds" )
 
-    if ( !file.exists( dataset.submission.file ) | params$create_new ){
-            
-        data_submissions = api_data( periods = periods.vector , 
-                                levels = levels.vector , 
-                                de.vars = de.include ,
-                                file = dataset.submission.file ,
-                                dsde = dsde ,
-                                details = FALSE , 
-                                submissions =  TRUE )
+    if ( file.exists( dataset.reporting.file )  ){
         
-    } else {
-        
-        data_submissions = readRDS( dataset.submission.file ) 
+        data_submissions = readRDS( dataset.reporting.file ) 
         
     }         
-          
-    
-   # Rename existing file
-   if ( file.exists( dataset.submission.file ) & params$create_new ){
-        
-        file.rename( dataset.submission.file ,
-                     paste( dataset.submission.file ,
-                            format( Sys.time(), "%b%d%Y" )
-                            )
-                     )
-    }
-    
-    # save new
-    if ( !file.exists( dataset.submission.file) ) saveRDS( data_submissions , dataset.submission.file )
 
     # get date
-    data_submissions_date = file.info( dataset.submission.file )$mtime
+    data_submissions_date = file.info( dataset.reporting.file )$mtime
 
 ```
 
@@ -645,10 +398,14 @@ Values shown are for the periods from `r min(periods.vector)` to `r max(periods.
 
 ```{r dataset_completeness }
   
-  d.ous = data_submissions %>% select( -level ) %>%
+  d_submissions =  data_submissions %>% 
         separate( col = dataElement , 
                   into = c('dataSet', 'Category' ), 
                   sep = "\\.") %>%
+        select( dataSet , Category, period, orgUnit, value ) %>%
+        mutate( value = as.integer( value ) ) %>%
+        spread( Category , value ) %>%
+        mutate( reporting_ratio = ACTUAL_REPORTS / EXPECTED_REPORTS ) %>%
         inner_join( md$dataSets %>% select( id, name ) , 
                     by = c( 'dataSet' = 'id') ) %>% 
         rename( dataSet = name , dataSet.id = dataSet) %>% 
@@ -657,18 +414,19 @@ Values shown are for the periods from `r min(periods.vector)` to `r max(periods.
                         ) 
     
                      
-  s = d.ous  %>%
-    # mutate( 
-    #     ous = fct_reorder( ous, level )
-    #     ) %>%
-    group_by( period, level, level.name , dataSet , Category ) %>%
-    summarise( report = n() )  %>% 
-    left_join( count( ous, level ) , by = 'level' ) %>%
-    mutate( completeness = report / n ) %>%
-    ungroup()
+  # s = d.ous  %>%
+  #   # mutate( 
+  #   #     ous = fct_reorder( ous, level )
+  #   #     ) %>%
+  #   group_by( period, level, level.name , dataSet , Category ) %>%
+  #   summarise( report = n() )  %>% 
+  #   left_join( count( ous, level ) , by = 'level' ) %>%
+  #   mutate( completeness = report / n ) %>%
+  #   ungroup()
   
   # convert month-Yr to date
-  s$date = fast_strptime( as.character(  s$period ) , "%Y%m") %>% as.POSIXct()
+  d_submissions$date = fast_strptime( as.character(  d_submissions$period ) ,
+                                      "%Y%m") %>% as.POSIXct()
   
 ```
 
@@ -677,16 +435,17 @@ This chart shows the percentage of active organisational units that were expecte
 ```{r expected_reports}
   # summary( s$completeness )
   
-    ggplot(s %>% filter( Category %in% "EXPECTED_REPORTS" ),  
-           aes(x = date, y = completeness, 
+    ggplot( d_submissions ,
+           aes(x = date, y = reporting_ratio , 
                    group = level.name , color = level.name )) +
     geom_line() +
     facet_wrap( ~ dataSet, 
                 labeller = label_wrap_gen( width = 25, multi_line = TRUE) ,
-                ncol = 4
+                ncol = 4 ,
+                scales = 'free'
                 ) +
     labs( title = 'Percent of OrgUnits Expected to Report', 
-             subtitle =  'denominator is current number of all org units' ,
+             # subtitle =  'denominator is current number of all org units' ,
              caption = params$dhis_instance ,
           x = "Percent"
              ) +
@@ -700,58 +459,48 @@ This chart shows the perecentage of active organisational units that reported, a
 ```{r actual_reports}
   # summary( s$completeness )
   
-if ( s %>% filter( Category %in% "ACTUAL_REPORTS" ) %>% nrow > 0 ){
-    
-    ggplot( s %>% filter( Category %in% "ACTUAL_REPORTS" ),  
-            aes(x = date, y = completeness,
-                group = level.name , color = level.name )
-            ) +
+
+    ggplot( d_submissions ,
+           aes(x = date, y = ACTUAL_REPORTS , 
+                   group = level.name , color = level.name )) +
     geom_line() +
     facet_wrap( ~ dataSet, 
                 labeller = label_wrap_gen( width = 25, multi_line = TRUE) ,
-                ncol = 4
+                ncol = 4,
+                scales = 'free'
                 ) +
         
-    labs( title = 'Percentage of Expected Recports Submitted', 
-             subtitle =  'denominator is current number of all org units' ,
+    labs( title = 'Actual Number of Reports Submitted', 
+             # subtitle =  'denominator is current number of all org units' ,
              caption = params$dhis_instance
-             ) +
-        
-    scale_y_continuous(labels = scales::percent)
+             ) 
     
-} else {
-    
-    cat("No data available on submitted datasets.")
-}
+
     
 ```
 
 ```{r actual_onTime_reports}
   # summary( s$completeness )
   
-if ( s %>% filter( Category %in% "ACTUAL_REPORTS_ON_TIME" ) %>% nrow > 0 ){
-    
-    ggplot( s %>% filter( Category %in% "ACTUAL_REPORTS_ON_TIME" ),  
-            aes(x = date, y = completeness,
-                group = level.name , color = level.name )
-            ) +
+  
+    ggplot(d_submissions ,
+           aes(x = date, y = ACTUAL_REPORTS_ON_TIME / EXPECTED_REPORTS , 
+                   group = level.name , color = level.name )) +
     geom_line() +
     facet_wrap( ~ dataSet, 
                 labeller = label_wrap_gen( width = 25, multi_line = TRUE) ,
-                ncol = 4
+                ncol = 4, 
+                scales =  'free'
                 ) +
         
     labs( title = 'Percentage of Expected Recports Submitted On-Time', 
-             subtitle =  'denominator is current number of all org units' ,
+             # subtitle =  'denominator is current number of all org units' ,
              caption = params$dhis_instance
              ) +
         
     scale_y_continuous(labels = scales::percent)
     
-} else {
-    
-    cat("No data available on submitted datasets.")
-}
+
 ```
 
 ## Percent completeness by Data Element
@@ -760,51 +509,100 @@ if ( s %>% filter( Category %in% "ACTUAL_REPORTS_ON_TIME" ) %>% nrow > 0 ){
 
 ```{r Submission_de_details }
 
-    s = data_totals %>% select( -level ) %>%
-        left_join(  ous %>% select( id, level, level.name ) , 
-                    by = c('orgUnit' = 'id') ) %>%
-        count( dataElement , level, level.name , period ) %>% 
-        rename( reported = n ) %>%
-        left_join( count( ous, level ) , by = 'level' ) %>%
-        rename( expected = n ) %>%
-        mutate( 
-            completeness = reported / expected 
-            ) %>%
+
+    data.details.count.file = paste0( dataset.directory , 
+                               dhis_instance,
+                               "_count_details.rds" )
+
+    data.details.count = read_rds( data.details.count.file ) 
     
-        # data element names 
-        rename( id = dataElement ) %>%
-        left_join( 
-            md$dataElements %>% select( id, name ) , 
-            by = c( 'id' ) 
-            ) %>%
-        rename( dataElement = name )
+    #  glimpse( data.details.count )
+    
+    
+    # List of datasets associated with dataElements
+    dsde = dataSet_dataElement_df( md )
+    # View( dsde )
+    
+    ## filter to those datasets with dataElements in data.details.count
+    dsde = dsde %>% 
+      filter( dataElement.id %in% unique( data.details.count$dataElement )) %>%
+      select( dataSet , dataElement , dataElement.id ) %>%
+      group_by( dataElement.id, dataElement ) %>%
+      summarise( dataSet = paste( dataSet , collapse = " ;\n ") )
+    
+    ## get names for dataElement, catefogies, etc, 
+    ## link with datasets
+    d.details.count = data.details.count %>% 
+      filter( level %in% 1 , !is.na(orgUnit ) ) %>%
+      select( level, orgUnit, dataElement, categoryOptionCombo,  
+              period, value ) %>%
+      dhis2_Join_metadata( 'dataElements', 'dataElement') %>%
+      dhis2_Join_metadata( 'categoryOptionCombos', 'categoryOptionCombo') %>%
+      # dhis2_Join_metadata( 'organisationUnits', 'orgUnit') %>%
+      inner_join( dsde %>% select( dataSet , dataElement.id ), 
+                  by = c("dataElement" = "dataElement.id")
+                  ) %>%
+      mutate( value = as.integer( value ))
+
+    # View(d.details.count)
+
+    # s = data_details %>% select( -level ) %>%
+    #     left_join(  ous %>% select( id, level, level.name ) , 
+    #                 by = c('orgUnit' = 'id') ) %>%
+    #     count( dataElement , categoryOptionCombo, level, level.name , period ) %>% 
+    #     rename( reported = n ) %>%
+    #     left_join( count( ous, level ) , by = 'level' ) %>%
+    #     rename( expected = n ) %>%
+    #     mutate( 
+    #         completeness = reported / expected 
+    #         ) %>%
+    # 
+    #     # data element names 
+    #     rename( id = dataElement ) %>%
+    #     left_join( 
+    #         md$dataElements %>% select( id, name ) , 
+    #         by = c( 'id' ) 
+    #         ) %>%
+    #     rename( dataElement = name )
 
     # convert month-Yr to date
-    s$date = fast_strptime( as.character(  s$period ) , "%Y%m") %>% as.POSIXct()
+    d.details.count$date = fast_strptime( 
+      as.character(  d.details.count$period ) , "%Y%m"
+      ) %>% 
+      as.POSIXct()
   
     # summary( s$completeness )
   
 
 ```
 
-Subset to organizational unit levels with at least 20 expected reports
+
 
 ```{r de_completeness_charts}
 
+dataSets = unique( d.details.count$dataSet)
+
+expected_submissions = d_submissions %>% 
+  filter( map_lgl( dataSet, ~grepl( .x, dataSets[1] )), date %in% max( date, na.rm = T )) %>%
+  pull ( EXPECTED_REPORTS ) %>% max
+
 # percent completeness 
-    ggplot(s %>% filter(expected >=20 ),  aes(x = date, y = completeness, 
-                   group = level.name , color = level.name )) +
+    ggplot(d.details.count %>% filter( dataSet %in% dataSets[1]),  
+           aes(x = date, y = value / expected_submissions , 
+                   group = categoryOptionCombo.name , 
+               color = categoryOptionCombo.name )
+           ) +
     geom_line() +
     # scale_y_continuous(limits = c(0,NA)) +
-    facet_wrap( ~ dataElement, 
-                labeller = label_wrap_gen(width = 25, multi_line = TRUE) ,
-                ncol = 4
+    facet_grid( dataSet ~ dataElement.name , 
+                labeller = label_wrap_gen(width = 25, multi_line = TRUE) 
                 ) +
     labs( title = 'Percent completeness by level', 
-             subtitle =  '' ,
+             subtitle =  'Relative to most recent number of reports expected' ,
              caption = params$origin_login_file
              ) +
-    scale_y_continuous(labels = scales::percent)
+    theme_minimal() +
+    scale_y_continuous(labels = scales::percent, breaks = seq(0,1,.1))
     
     # ggplotly( g )
     
@@ -835,8 +633,9 @@ Table of number of org units that provided data for each data element, stratifie
 
 ```{r Submission_de_Totals }
 
-
- d = data_totals  %>% select( -level ) %>%
+ d = data_totals  %>% 
+     
+     # select( -level ) %>%
     
     # Remove any rows with all missing data
     filter( complete.cases(.) ) %>%
@@ -873,7 +672,8 @@ Table of number of org units that provided data for each data element, stratifie
  #       kable_styling(bootstrap_options = c("striped", "hover") ) %>%
  #        column_spec(1, bold = T) 
  
- pander( d  ) 
+ d  %>%
+ pander( split.table = Inf , big.mark = "," )
  
 ```
 
@@ -895,96 +695,6 @@ Detect outliers/anomalies:
 - Anomallize
 
 # Population and Attendance 
-## Population
-
-```{r population, eval=FALSE }
-
-
-    data.populations.file = paste0( origin.folder , 
-                     dhis_instance, 
-                     "_poulations.rds" )
-
-    if ( file.exists( data.populations.file ) ){
-        
-          data_poulations = readRDS( data.populations.file ) 
-          
-# TODO: check for missing dates, then update 
-          # - make fetch into a function usable for details, details, and datasets...
-                                
-          
-    } else {
-        
-    # get selected rows from every spreadsheet tab
-    de.include = map_df(  seq_along(sheets) , 
-                         ~readxl::read_xlsx( de.review.xlsx ,  sheet = .x ) %>% 
-        filter( !is.na(Include) ) %>% 
-        distinct( dataElement.id, .keep_all = TRUE )
-    )
-
-    # if none selected, pick intersection of malaria and confirmed 
-    if ( nrow( de.include) == 0 ){
-        
-        de.include = read_rds( paste0( origin.folder ,
-                               dhis_instance, 
-                               "_key_data_elements.rds" ) 
-                            ) 
-            
-    }
-            
-        data_populations = api_data( periods = periods.vector , 
-                                levels = levels.vector , 
-                                de.vars = de.include ,
-                                file = "" ,
-                                details = TRUE , 
-                                submissions =  FALSE )
-        
-        # save data
-        write_rds( data_populations, data.populations.file )
- 
-    }
-
-    # get date
-    data_populations_date = file.info( data.populations.file )$mtime
-
-```
-
-## Attendance
-
-
-```{r attendance , eval=FALSE }
-
-    data.attendances.file = paste0( origin.folder , 
-                     dhis_instance, 
-                     "_attendances.rds" )
-
-    if ( file.exists( data.attendances.file ) ){
-        
-          data_poulations = readRDS( data.attendances.file ) 
-          
-# TODO: check for missing dates, then update 
-          # - make fetch into a function usable for details, details, and datasets...
-                                
-          
-    } else {
-        
-        de.include =     
-        
-        data_attendances = api_data( periods = periods.vector , 
-                                levels = levels.vector , 
-                                de.vars = de.include ,
-                                file = "" ,
-                                details = TRUE , 
-                                submissions =  FALSE )
-        
-        # save data
-        write_rds( data_attendances, data.attendances.file )
- 
-    }
-
-    # get date
-    data_attendances_date = file.info( data.attendances.file )$mtime
-```
-
 
 # Field visits
 

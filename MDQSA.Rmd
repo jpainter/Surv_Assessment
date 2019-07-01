@@ -13,7 +13,7 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  dhis_instance: Malawi
+  dhis_instance: Kenya.demo
   data_directory:  datasets
   output_directory: 
   output_format: word_document
@@ -552,9 +552,11 @@ _ for each non Admin orgUnit,
 Step: find orgUnit with polygon data that it belongs to. Separate path and transform to long lorm
 
 
-```{r clinics2.}
+```{r clinics2. }
 
  # if ( !exists( "clinics" ) | params$create_new ) clinics = readRDS( clinics_file )
+
+hf = ous.sf %>% filter( feature %in% 'Point' )
 
 # Long form or clinics dataframe with row for each clinic-parent
 clinics. = hf %>%
@@ -607,31 +609,35 @@ keep_the_existing_one = FALSE # so, dont download a new one.
          
  } else {
      
-     nc = nrow(clinics.)
+     clinics. =  ous.sf$feature %in% 'Point' 
+     .clinics = ous %>% filter( clinics. )
+     
+     nc = nrow( .clinics )
      
      pb <- progress_estimated( nc )
      
      # test if facility is in lowest parent level
-     c = clinics. %>% 
+     c = .clinics %>% 
          group_by( orgUnit ) %>%
          # filter( parent.level == max( parent.level ) ) %>%
          ungroup() %>%
          mutate(
-             in.parent = map2_lgl( orgUnit, parent.id , 
+             in.parent = map2_lgl( orgUnit, parent_ou , 
                                    ~is.in.parent(.x, .y, 
-                                                 .pb = pb, clinics = clinics. ,
+                                                 .pb = pb, 
+                                                 clinics = .clinics ,
                                                  buffer_arc_seconds = 300 ) 
                                    ) ,
              
              has.coordinates = ifelse( is.na( geometry ) | is.na( geometry ), 
                                        FALSE, TRUE ) ,
              
-             has.parent = map_lgl( parent.id , ~.x %in% ous.sf$orgUnit )
+             has.parent = map_lgl( parent_ou , ~.x %in% ous.sf$orgUnit )
          )
  }
  
  
- count(c, level ,  has.coordinates , has.parent,  in.parent  ) 
+ count( c, level ,  has.coordinates , has.parent,  in.parent  ) 
  
  
 ```
@@ -652,9 +658,12 @@ keep_the_existing_one = FALSE # so, dont download a new one.
         p$pause(0)$tick()$print()
      
         in.parent.fix[[i]] = map2_lgl( c.to.fix$orgUnit[i], 
-                                   c.to.fix$parent.id[i] , 
-                                   ~is.in.parent( .x, .y  , fix = TRUE ,
-                                                  .pb = pb, clinics = clinics. )
+                                   c.to.fix$parent_ou[i] , 
+                                   ~is.in.parent( .x, .y  , 
+                                                  fix = TRUE ,
+                                                  .pb = pb, 
+                                                  ous = ous.sf ,
+                                                  clinics = .clinics )
         )
  }        
  
@@ -837,7 +846,9 @@ if ( !exists( "facilities" ) ){
   # levels
   levels = ou_levels( md )
 
-
+    ## TODO fix error in api_dataset, 'object 'levels.vector' not found'
+    levels.vector =  ou_levels( md , name = FALSE ) 
+  
 ```
 
 - Create table, 'dsde',  to lookup form associated with eath data element 
@@ -847,6 +858,7 @@ if ( !exists( "facilities" ) ){
 dsde = dataSet_dataElement_df( md )
 
 ```
+
 
 
 ## Data elements 
@@ -1045,9 +1057,7 @@ dsde = dataSet_dataElement_df( md )
                dataElement = name
        ) 
 
-    ## TODO fix error in api_dataset, 'object 'levels.vector' not found'
-    levels.vector =  ou_levels( md , name = FALSE ) 
-    
+  
         dataset_reporting = api_dataset( 
                                 levels = levels.vector[1] , 
                                 
@@ -1585,7 +1595,7 @@ data_element_table = de.include %>%
 
     group_by( dataElement.id ) %>%
     summarise_all( 
-        funs( paste( unique(.) , collapse = ';\n' ) ) 
+        list( ~paste( unique(.) , collapse = ';\n' ) ) 
         ) %>%
     
     # mutate( topic = factor( topic , levels = unique( topics ) ) ) %>% 
@@ -2303,7 +2313,7 @@ de_reported_by_month = count( d.nest.dec %>% unnest( data ), dataElement.name  ,
 pb <- progress_estimated( nrow( de_reported_by_month ) )
     
 de.reported.ts = de_reported_by_month %>% 
-       rename( value = nn ) %>%
+       rename( value = n ) %>%
        nest( period  , value ) %>%
         mutate( 
             ts = map( data,   ~ts.df(.x , .pb = pb )  ) ,
@@ -2461,7 +2471,7 @@ ou.dataset = # data.frame with each orgunit - dataset combination (long form)
 
 # choose data element ####
 
-de.selected = de.all[ 21 ] #"NMCP OPD Confirmed Malaria Cases Through RDT
+de.selected = de.all[ 3 ] #"NMCP OPD Confirmed Malaria Cases Through RDT
 
 # de.selected = de.all[17] # IDSR Malaria [zero is recorded]
 
@@ -2482,7 +2492,7 @@ categoryOptionCombo.for.dataElement = x %>%
 # categoryOptionCombo.for.dataElement # 1 row=1 for <5years (Malawi)
 
 categoryOptionCombo.selected = categoryOptionCombo.for.dataElement %>% 
-    filter( row_number() == 1 ) %>%
+    filter( row_number() == 2 ) %>%
     .$categoryOptionCombo.name
 
 
@@ -2620,7 +2630,7 @@ ts.gg = ggplot() +
                aes( x = date ,y=Y),
                color = 'blue', size = 1 ) +
     
-    labs( title = de.all[ 21 ], 
+    labs( title = de.all[ 10 ], 
           subtitle = categoryOptionCombo.selected , 
           caption = paste( params$dhis_instance , 
                            "as reported on" , 
@@ -2832,7 +2842,7 @@ ggplot() +
 # choose data element ####
 de.coc.all = unique(d$de.coc.name)
 
-de.coc.selected = de.coc.all[13] # "NMCP OPD Suspected Malaria Cases Tested For Malaria Through RDT_<5Yrs"
+de.coc.selected = de.coc.all[9] # "NMCP OPD Suspected Malaria Cases Tested For Malaria Through RDT_<5Yrs"
 
 
 # model d.nest for selected element/catoegory: "HMIS Malaria – New Case (under 5)" ####
@@ -3065,7 +3075,7 @@ interp.mape( x.ts[ which( x.ts$n > 0 &  x.ts$n < 12  )[1] , ]$ts[[1]] )
 count( x.ts, level, parent_ou.name )
 
 regional.ts = x.ts %>% 
-  filter( n >= 48 , !is.na( parent_ou.name ) , level == 4 
+  filter( n >= 24 , !is.na( parent_ou.name ) , level == 4 
           ) %>%
   group_by( parent_ou.name ) %>%
   summarise( 
@@ -3073,7 +3083,7 @@ regional.ts = x.ts %>%
     ) 
 
 regional.ts$ts.clean = map( regional.ts$parent_ou.name , 
-                      ~ts_sum( x.ts %>% filter( n >= 48 ,
+                      ~ts_sum( x.ts %>% filter( n >= 24 ,
                                                 parent_ou.name == .x ),
                                                 quo(ts.clean) ) 
                                ) 
@@ -3094,7 +3104,9 @@ plotly::ggplotly( gg.regional.ts )
 
 # examine specific district
 dataset =  x.ts %>% 
-  filter( n >= 48 , parent_ou.name %in% "Nsanje-DHO" ) %>%
+  filter( n >= 24
+          # , parent_ou.name %in% "Nsanje-DHO" 
+          ) %>%
   select( orgUnit.name , parent_ou.name , n, ts.clean, ts )
 
 gg.dho.ts = 
@@ -3120,7 +3132,9 @@ Table of District level Error
 tsd.parent = x.dec %>% 
   filter( feature %in% "Polygon" ) %>%
   dplyr::select( orgUnit.name , level , total, dec ) %>%
-  mutate( bins = cut( dec , breaks = seq(0, 1, .1 ),  labels = seq(0.05, .95, .1 ) ) %>% 
+  mutate( bins = cut( dec , breaks = seq(0, 1, .1 ),  
+                      labels = seq(0.05, .95, .1 ) 
+                      ) %>% 
               as.character() %>% as.numeric() )
 
 kable( tsd.parent )
@@ -3357,6 +3371,8 @@ walk( 1:n_elements , ~quality_histogram( de.coc.all[.x] , .pb = pb) )
 
 radius_factor = 1e4
 
+
+
 quality_leaflet = function( element = NULL , 
                             d.nest.dec. = d.nest.dec ,
                             subtitle = instance ,
@@ -3529,6 +3545,34 @@ n_elements = length( de.coc.all )
 
 ```
 
+```{r admins}
+admins = md$organisationUnits %>%
+    select( id, name, coordinates, openingDate, closedDate, path  ) %>%
+    as_tibble %>%
+    mutate(
+        feature_type = map_chr( coordinates, ~feature_type(.x) )
+        ) %>%
+    filter( feature_type %in% 'Polygon'  ) %>%
+    # filter( !is.na(coordinates), is.na( closedDate ) )  %>%
+    mutate(
+
+        level = map_int( path,
+                         ~length( gregexpr("/", .x, perl = TRUE)[[1]])
+            ) ,
+
+        Year = year( ymd_hms( openingDate ) )  %>% ifelse( .<2008 , 2014 , . ) ,
+
+        coordinates = fix_coordinate_brackets( coordinates ) ,
+
+        str_js = paste(
+            '{ "type": "MultiPolygon", "coordinates": ' ,
+            coordinates , ' }'
+            )
+
+    ) %>%
+    as_tibble()
+
+```
 
 ```{r , results='as.is' }
 
@@ -3536,7 +3580,7 @@ n_elements = length( de.coc.all )
 
 html <- list()
 
-i = 16  ; de.coc.all[16] # "NMCP OPD Confirmed Malaria Cases Through RDT_<5Yrs"
+i = 9  ; de.coc.all[9] # "NMCP OPD Confirmed Malaria Cases Through RDT_<5Yrs"
 
  html <- c( html, 
              list( h3( paste0( de.coc.all[i] 
