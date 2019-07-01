@@ -213,6 +213,42 @@ categoryCombos = reactive({
 }) 
 
 
+categoryOptionCombos = reactive({
+        
+    if (  login() ){
+    
+    # if available, use resources method
+    url<-paste0( input$baseurl,"api/categoryOptionCombos.json?fields=:all&paging=false")
+    cols = c( 'id', 'name',  'categoryCombo' )
+    categoryOptionCombos =  get( url )[[1]] %>% 
+      select( !!cols ) %>% 
+      rename( categoryOptionCombo.id = id, categoryOptionCombo = name ) 
+    
+  coc = map_df( 1:length( categoryOptionCombos$categoryOptionCombo ),
+                ~merge( categoryOptionCombos[.x , 1:2] ,
+                        categoryOptionCombos$categoryCombo[.x, ] , all = T
+                         )
+                ) %>%
+    rename( categoryCombo.id = y )
+
+  
+  categories = coc %>%
+      inner_join( categoryCombos() ,
+                  by = 'categoryCombo.id' ) %>%
+      group_by( categoryCombo.id, categoryCombo ) %>%
+      summarise(
+        n_categoryOptions = n() ,
+        Categories = paste( categoryOptionCombo , collapse = '; '  )
+      )
+  
+  return( categories )
+ 
+    } else { "Unable to login to server" }
+}) 
+
+# renderTable( categoryOptionCombos() )
+
+
 de.rows = reactive({ 
   req( dataElements() )
   de = dataElements()
@@ -260,12 +296,12 @@ renderText( cc.rows() )
 dataDictionary = reactive({
   req( dataElements() )
   req( dataSets() )
-  req( categoryCombos() )
+  req( categoryOptionCombos() )
   req( dataElementGroups() )
   
   de = dataElements()
   ds = dataSets()
-  cc = categoryCombos()
+  coc = categoryOptionCombos()
   deg = dataElementGroups()
   
   # create matrix of data elements within each dataset 
@@ -288,14 +324,21 @@ dataDictionary = reactive({
                               ) ,
                by = 'dataSet.id' ) %>%
     
-    left_join( cc, by = 'categoryCombo.id'  ) %>%
+    left_join( coc, by = 'categoryCombo.id'  ) %>%
  
     left_join( deg , by = 'dataElement.id' )  %>%
     
-    select( dataSet, dataElement, categoryCombo , dataElementGroup , zeroIsSignificant , 
+    select( dataSet, dataElement, n_categoryOptions, Categories , dataElementGroup , zeroIsSignificant , 
             periodType ,
-            dataSet.id, dataElement.id, categoryCombo.id , shortName , displayName, displayShortName )
-    
+            dataSet.id, dataElement.id, categoryCombo.id , shortName , displayName, displayShortName )     
+  
+  # collapse all muliptle entries for each data element
+  # group_by( dataElement.id ) %>%
+  #   summarise_all( 
+  #       list( ~paste( unique(.) , collapse = ';\n' ) ) 
+  #       )
+  
+  
   # For versions <2.6, need to add categoryCombo
   # if ( !'categoryCombo' %in% names(dsde) ){
   #   categoryCombos =  tibble(
