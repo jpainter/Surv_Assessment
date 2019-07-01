@@ -144,11 +144,35 @@ dataElements = reactive({
     # there are a couple forms of metadata in the api.  This code tests the format, then gets metadata
     # if available, use resources method
     url<-paste0( input$baseurl,"api/dataElements.json?fields=:all&paging=false")
-    cols = c( 'id', 'name', 'shortName' , 'displayName', 'displayShortName' , 'categoryCombo'  )
+    cols = c( 'id', 'name', 'shortName' , 'displayName', 'displayShortName' , 'categoryCombo' ,
+              'zeroIsSignificant' )
     dataElements =  get( url )[[1]] %>% select( !!cols ) 
     
     } else { "Unable to login to server" }
 }) 
+
+dataElementGroups = reactive({
+        
+    if (  login() ){
+    
+    # there are a couple forms of metadata in the api.  This code tests the format, then gets metadata
+    # if available, use resources method
+    url<-paste0( input$baseurl,"api/dataElementGroups.json?fields=:all&paging=false")
+    cols = c( 'id', 'name' , 'dataElements' )
+    dataElementGroups =  get( url )[[1]] %>% select( !!cols ) %>%
+      rename( dataElementGroups.id = id , dataElementGroup = name )
+    
+    deg = map_df( 1:length( dataElementGroups$dataElementGroup) , 
+                  ~merge( dataElementGroups[ .x, 1:2] ,
+                              dataElementGroups$dataElements[[.x]] , all = T)
+                          ) %>%
+      rename( dataElement.id = id)
+    
+    return( deg )
+    
+    } else { "Unable to login to server" }
+}) 
+
 
 dataSets = reactive({
         
@@ -226,10 +250,12 @@ dataDictionary = reactive({
   req( dataElements() )
   req( dataSets() )
   req( categoryCombos() )
+  req( dataElementGroups() )
   
   de = dataElements()
   ds = dataSets()
   cc = categoryCombos()
+  deg = dataElementGroups()
   
   # create matrix of data elements within each dataset 
   # (info comes from dataset table, not data element table)
@@ -242,14 +268,19 @@ dataDictionary = reactive({
     rename( dataElement.id = dataElement ,
             dataSet.id = dataSet ,
             categoryCombo.id = categoryCombo ) %>%
-    left_join( de %>% select( id, name ) ,
+    left_join( de %>% select( -categoryCombo ) ,
                by = c('dataElement.id' = 'id' )) %>%
     rename( dataElement = name ) %>%
+    
     left_join( ds %>% select( dataSet.id, dataSet ) ,
                by = 'dataSet.id' ) %>%
+    
     left_join( cc, by = 'categoryCombo.id'  ) %>%
-    select( dataSet, dataElement, categoryCombo ,
-            dataSet.id, dataElement.id, categoryCombo.id )
+ 
+    left_join( deg , by = 'dataElement.id' )  %>%
+    
+    select( dataSet, dataElement, categoryCombo , dataElementGroup , zeroIsSignificant , 
+            dataSet.id, dataElement.id, categoryCombo.id , shortName , displayName, displayShortName )
     
   # For versions <2.6, need to add categoryCombo
   # if ( !'categoryCombo' %in% names(dsde) ){
