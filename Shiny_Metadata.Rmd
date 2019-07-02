@@ -238,7 +238,8 @@ categoryOptionCombos = reactive({
       group_by( categoryCombo.id, categoryCombo ) %>%
       summarise(
         n_categoryOptions = n() ,
-        Categories = paste( categoryOptionCombo , collapse = '; '  )
+        Categories = paste( categoryOptionCombo , collapse = ' ; '  ) ,
+        Category.ids = paste( categoryOptionCombo.id , collapse = ' ; '  )
       )
   
   return( categories )
@@ -330,7 +331,7 @@ dataDictionary = reactive({
     
     select( dataSet, dataElement, n_categoryOptions, Categories , dataElementGroup , zeroIsSignificant , 
             periodType ,
-            dataSet.id, dataElement.id, categoryCombo.id , shortName , displayName, displayShortName )     
+            dataElement.id, Category.ids , shortName , displayName, displayShortName )     
   
   # collapse all muliptle entries for each data element
   # group_by( dataElement.id ) %>%
@@ -476,7 +477,7 @@ DT::renderDataTable(
 ```{r select_data_elements }
 
 conditionalPanel(condition="$('html').hasClass('shiny-busy')",
-                          tags$div("Loading...", id="loadmessage")
+                          tags$div( "Loading...", id = "loadmessage" )
          ) 
 
 # download button
@@ -637,3 +638,6 @@ DT::renderDataTable(
 
 )
 ```
+
+
+## Malaria-relevant Datasets (data entry forms)
