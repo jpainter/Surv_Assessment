@@ -21,11 +21,43 @@ runtime: shiny
 knitr::opts_chunk$set(echo = FALSE)
 
 
-source('dhis2_functions.R')
+# source('dhis2_functions.R')
 
+library( knitr )
 library( tidyverse )
 library( rlang )
 library( stringi )
+library( tidyselect )
+library( jsonlite )
+library( httr )
+library( curl )
+library( assertthat )
+library( rlang )
+library( stringi )
+library( DT )
+
+```
+
+```{r helper_function}
+
+# JSON helper function ####
+## gets json text from url and converts to data frame 
+get = function( source_url , .print = TRUE , ...){
+    
+    if ( .print ) print( paste( "downloading from" , source_url , "...") )
+    
+    from_url =  GET( source_url ) 
+    
+    if ( from_url$status_code != 200 ) return( FALSE )
+    
+    g = fromJSON( 
+        
+        suppressMessages( content( from_url , "text") ) 
+    )
+    
+    return( g )
+    
+}
 
 ```
 
@@ -655,3 +687,31 @@ DT::renderDataTable(
 
 
 ## Malaria-relevant Datasets (data entry forms)
+
+```{r list_of_datasets}
+
+conditionalPanel(condition="$('html').hasClass('shiny-busy')",
+                          tags$div( "Loading...", id = "loadmessage" )
+         ) 
+
+datasetsInMalariaDictionary = reactive({
+  
+  req( malariaDataDictionary()   )
+  
+  datasets = malariaDataDictionary()  %>%
+    select( dataSet , periodType ) %>% unique
+  
+  
+})
+
+
+# renderText( search.rows() )
+
+
+DT::renderDataTable( 
+    
+    datasetsInMalariaDictionary()  , options = list(pageLength = 25)
+
+)
+```
+
