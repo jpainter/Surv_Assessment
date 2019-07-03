@@ -40,6 +40,16 @@ library( DT )
 
 ```{r helper_function}
 
+# Login ####
+loginDHIS2<-function( baseurl, username, password) {
+  
+  url<-paste0( baseurl, "api/me" )
+  
+  r <-  GET( url, authenticate(username, password) ) 
+    
+  assert_that( r$status_code == 200L ) 
+}
+
 # JSON helper function ####
 ## gets json text from url and converts to data frame 
 get = function( source_url , .print = TRUE , ...){
@@ -80,8 +90,21 @@ inputPanel(
   
   textInput("username", label = "User name:", NULL ), # "admin"
   
-  passwordInput("password", label = "Password:", NULL ) #"district"
+  passwordInput("password", label = "Password:", NULL ), # "district"
+  
+  checkboxInput("demo", label = "Test: use dhis2 demo", FALSE )
 )
+
+
+observe({
+  req( input$demo )
+  if ( input$demo ){
+    
+    updateTextInput( session, "baseurl" , value = "https://play.dhis2.org/2.28/" )
+    updateTextInput( session, "username" , value = "admin" )
+    updateTextInput( session, "password" , value = "district" )
+  }
+})
 
 baseurl = reactive({
         # if url is from login or dashboard url, trimto get baseurl
@@ -95,13 +118,19 @@ baseurl = reactive({
 login = reactive({ 
   
       req( baseurl() )
+      baseurl = baseurl()
       
       if ( is_empty( baseurl() ) | is_empty( input$username ) | is_empty( input$password ) ) return( FALSE )
   
-      login = try( loginDHIS2( baseurl() , input$username, input$password) )
+      login = try( loginDHIS2( baseurl , input$username, input$password) )
       if ( class( login ) == "logical" ) return( login ) 
       return( FALSE )
     })
+
+# renderText({  
+#   req( baseurl() ) 
+#   paste( baseurl()  , input$username, input$password )
+#   })
 
 ```
 
@@ -129,6 +158,12 @@ system.info = reactive({
                   calendar, dateFormat )
      } else { NA }
 }) 
+
+renderText({  
+  req( baseurl() ) 
+  # req( login() )
+  paste0( baseurl() , "api/system/info" , "  LOGIN:", login() )
+  })
 
 conditionalPanel(condition="$('html').hasClass('shiny-busy')",
                           tags$div("Loading...",id="loadmessage")
@@ -207,7 +242,7 @@ dataElementGroups = reactive({
     
     # there are a couple forms of metadata in the api.  This code tests the format, then gets metadata
     # if available, use resources method
-    url<-paste0( input$baseurl,"api/dataElementGroups.json?fields=:all&paging=false")
+    url<-paste0( baseurl() , "api/dataElementGroups.json?fields=:all&paging=false")
     cols = c( 'id', 'name' , 'dataElements' )
     dataElementGroups =  get( url )[[1]] %>% select( !!cols ) %>%
       rename( dataElementGroups.id = id , dataElementGroup = name )
@@ -234,7 +269,7 @@ dataSets = reactive({
     if (  login() ){
     
     # if available, use resources method
-    url<-paste0( input$baseurl,"api/dataSets.json?fields=:all&paging=false")
+    url<-paste0( baseurl() , "api/dataSets.json?fields=:all&paging=false")
     cols = c( 'id', 'name' , 'dataSetElements'
               , 'periodType'
               )
@@ -250,7 +285,7 @@ categoryCombos = reactive({
     if (  login() ){
     
     # if available, use resources method
-    url<-paste0( input$baseurl,"api/categoryCombos.json?fields=:all&paging=false")
+    url<-paste0( baseurl() , "api/categoryCombos.json?fields=:all&paging=false")
     cols = c( 'id', 'name'  )
     categoryCombos =  get( url )[[1]] %>% select( !!cols ) %>% 
       rename( categoryCombo.id = id, categoryCombo = name )
@@ -264,7 +299,7 @@ categoryOptionCombos = reactive({
     if (  login() ){
     
     # if available, use resources method
-    url<-paste0( input$baseurl,"api/categoryOptionCombos.json?fields=:all&paging=false")
+    url<-paste0( baseurl() , "api/categoryOptionCombos.json?fields=:all&paging=false")
     cols = c( 'id', 'name',  'categoryCombo' )
     categoryOptionCombos =  get( url )[[1]] %>% 
       select( !!cols ) %>% 
@@ -714,4 +749,50 @@ DT::renderDataTable(
 
 )
 ```
+
+## Malaria-relevant Indicators
+
+```{r}
+
+conditionalPanel(condition="$('html').hasClass('shiny-busy')",
+                          tags$div( "Loading...", id = "loadmessage" )
+         ) 
+
+indicators = reactive({
+        
+    if (  login() ){
+    
+    # if available, use resources method
+    url<-paste0( baseurl() ,"api/indicators.json?fields=:all&paging=false")
+    cols = c( 'id', 'name' , 'displayName', 'description' , 'numerator' , 'denominator' ,
+              'annualized'
+              )
+    indicators =  get( url )[[1]] %>% select( !!cols ) %>% 
+      rename( indicators.id = id, indicator = name )
+    
+    } else { "Unable to login to server" }
+}) 
+
+indicator.rows = reactive({ 
+  
+  req( indicators() )
+  ind.rows = nrow( indicators())
+  paste( 'There are', ind.rows , 'indicators. ' ) 
+  })
+
+renderText( indicator.rows() )
+
+```
+
+The following indicators contain malaria-relevant data elements in their formulas
+
+```{r}
+DT::renderDataTable( 
+    
+    indicators()  , options = list(pageLength = 25)
+
+)
+```
+
+
 
